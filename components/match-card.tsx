@@ -289,7 +289,7 @@ export function MatchCard({ profile, userIntent, onConnect }: MatchCardProps) {
                 })}
               {/* Contextual Badges - If present */}
               {profile.activeBadges
-                .filter((badge) => badge.category === "CONTEXTUAL")
+                .filter((badge) => (badge.category as string) === "CONTEXTUAL")
                 .map((badge) => {
                   const IconComponent = getBadgeIcon(badge.icon);
                   return (
