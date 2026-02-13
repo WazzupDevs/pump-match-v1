@@ -1,0 +1,40 @@
+# GHOSTFACE PROTOCOL - MASTER RULES
+
+# 1. PRODUCT VISION & PHILOSOPHY
+- **Identity:** This is a Reputation & Identity Layer for Solana. NOT a trading bot.
+- **Goal:** "The Credit Score of Solana". Transform raw data into "Insights" (e.g., "Balance: 10 SOL" -> "Balance: 10 SOL (Whale Status 🐋)").
+- **Protocol Logic:** Focus on Security, Deterministic Math, and Anti-Sybil mechanisms.
+- **Privacy First:** Explicit Opt-in required for database entry (Active Wallet Registry).
+
+# 2. TECH STACK (STRICT)
+- **Framework:** Next.js 14 (App Router).
+- **UI:** Tailwind CSS + Shadcn UI (Custom dark mode: "Ghostface" / Cyber-Security Aesthetic).
+- **Data:** Helius DAS API (Read-Only focus). Use `lib/helius.ts`.
+- **Visualization:** Recharts.
+
+# 3. ARCHITECTURE CONSTRAINTS (CRITICAL)
+- **Source of Truth:** Server-side ONLY. Never calculate trust scores on the client.
+- **Client Role:** Client is a "Dumb Renderer". It only displays data received from Server Actions.
+- **Database Pattern:** Use `lib/db.ts` (Mock In-Memory) for MVP. Do NOT install external DBs (Supabase/Postgres) yet.
+- **Trading Ban:** Do NOT implement swap forms, bonding curves, or AMM math.
+
+# 4. GHOSTFACE MATH & LOGIC
+- **Weak Link Formula:** When matching, the lowest trust score pulls the average down.
+- **Math Caps:**
+  - Badge Bonus CAP: +25
+  - Context Bonus CAP: +20
+  - Global CAP: 98 (Intentionally not 100).
+- **Social Decay:** Always apply `[1, 0.6, 0.3]` decay to social badges to prevent Sybil attacks.
+- **Badge Separation:** Strictly maintain "SYSTEM" vs "SOCIAL" badge categories.
+
+# 5. CODING BEHAVIOR
+- **Hydration Safety:** Always use `"use client"` for UI components dependent on browser APIs.
+- **Error Handling:** If Helius API fails, handle gracefully. Do not break the UI.
+- **Self-Correction:** If you generate code that causes linter errors, fix them autonomously without asking.
+- **Types:** Use `UserIntent` enums strictly. No magic strings.
+
+# 6. FILE STRUCTURE CONTEXT
+- `app/page.tsx`: Main Dashboard, State Orchestration & Search Logic.
+- `app/actions/analyzeWallet.ts`: The Brain. All logic/calculations happen here.
+- `lib/match-engine.ts`: The Heart. Math formulas and Matrix logic.
+- `lib/db.ts`: The Memory. Mock Database for Opt-in users.
