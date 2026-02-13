@@ -2,9 +2,8 @@
 
 import {
   getAssetsByOwner,
-  getFirstTransaction,
   getSolBalance,
-  getWalletTransactionHistory,
+  getWalletTransactionData,
   searchAssets,
   type DasAsset,
 } from "@/lib/helius";
@@ -273,13 +272,17 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
   }
 
   try {
-    // Parallel data fetching (including wallet age)
-    const [assetsByOwnerResult, solBalance, transactionCount, firstTxData] = await Promise.all([
+    // Parallel data fetching (Enhanced Transactions API eliminates N+1 pattern)
+    // getWalletTransactionData replaces BOTH getWalletTransactionHistory AND getFirstTransaction
+    // in a single unified flow via Helius v0/addresses/{addr}/transactions endpoint.
+    const [assetsByOwnerResult, solBalance, txData] = await Promise.all([
       getAssetsByOwner(trimmed),
       getSolBalance(trimmed),
-      getWalletTransactionHistory(trimmed),
-      getFirstTransaction(trimmed), // Production Grade: Wallet age + funding source log
+      getWalletTransactionData(trimmed), // Unified: count + wallet age + funding source
     ]);
+
+    const transactionCount = txData.transactionCount;
+    const firstTxData = txData; // Compatible shape: { approxWalletAgeDays, ... }
 
     // getAssetsByOwner null fallback
     const assetsByOwner = assetsByOwnerResult || { items: [], total: 0 };

@@ -1,7 +1,9 @@
 import "server-only";
 
 // API Key kontrolü ve RPC URL oluşturma
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+// Support both HELIUS_API_KEY (server-only, preferred) and NEXT_PUBLIC_HELIUS_API_KEY (fallback)
+const HELIUS_API_KEY =
+  process.env.HELIUS_API_KEY || process.env.NEXT_PUBLIC_HELIUS_API_KEY;
 
 if (!HELIUS_API_KEY || typeof HELIUS_API_KEY !== "string" || HELIUS_API_KEY.trim().length === 0) {
   // eslint-disable-next-line no-console
@@ -11,6 +13,9 @@ if (!HELIUS_API_KEY || typeof HELIUS_API_KEY !== "string" || HELIUS_API_KEY.trim
 const HELIUS_RPC_URL = HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY.trim()}`
   : null;
+
+// Helius Enhanced Transactions API (REST, not RPC)
+const HELIUS_API_BASE = "https://api.helius.xyz";
 
 // Types
 type JsonRpcError = {
@@ -50,6 +55,42 @@ export type SearchAssetsParams = {
   tokenType?: "all" | "fungible" | "nonFungible";
   page?: number;
   limit?: number;
+};
+
+// ──────────────────────────────────────────────────────────────
+// Helius Enhanced Transactions API Types (v0 REST endpoint)
+// Returns pre-parsed transactions — no N+1 signature lookup needed.
+// ──────────────────────────────────────────────────────────────
+
+export type EnhancedTransaction = {
+  description: string;
+  type: string;
+  source: string;
+  fee: number;
+  feePayer: string;
+  signature: string;
+  slot: number;
+  timestamp: number;
+  nativeTransfers?: Array<{
+    fromUserAccount: string;
+    toUserAccount: string;
+    amount: number;
+  }>;
+  tokenTransfers?: Array<{
+    fromUserAccount: string;
+    toUserAccount: string;
+    fromTokenAccount: string;
+    toTokenAccount: string;
+    tokenAmount: number;
+    mint: string;
+    tokenStandard?: string;
+  }>;
+  accountData?: Array<{
+    account: string;
+    nativeBalanceChange: number;
+    tokenBalanceChanges: unknown[];
+  }>;
+  events?: Record<string, unknown>;
 };
 
 /**
@@ -182,156 +223,167 @@ export async function getSolBalance(address: string): Promise<number> {
   }
 }
 
+// ──────────────────────────────────────────────────────────────
+// Helius Enhanced Transactions API — Unified Transaction Fetcher
+// Replaces the old N+1 pattern:
+//   OLD: getSignaturesForAddress → loop getParsedTransaction
+//   NEW: Single v0/addresses/{addr}/transactions call (paginated)
+//
+// Benefits:
+//   - Pre-parsed EnhancedTransaction objects (no separate getTransaction call)
+//   - Funding source detection from nativeTransfers (no extra RPC round-trip)
+//   - Transaction count + wallet age + funding source in ONE flow
+// ──────────────────────────────────────────────────────────────
+
 /**
- * Fetch transaction history for a wallet using Helius RPC getSignaturesForAddress.
- * Returns the count of transactions (up to 1000).
- * Returns -1 if the RPC call fails (to distinguish from actual 0 transactions).
+ * Internal: Fetch a single page of enhanced transactions from Helius v0 REST API.
+ * Returns enriched transaction objects directly — no N+1 signature lookup needed.
+ * Max 100 per page (Helius API limit).
  */
-type SignatureInfo = {
-  signature: string;
-  slot: number;
-  err?: unknown;
-  memo?: string;
-  blockTime?: number;
-};
+async function fetchEnhancedTransactionPage(
+  address: string,
+  options?: { limit?: number; before?: string },
+): Promise<EnhancedTransaction[]> {
+  const apiKey = HELIUS_API_KEY;
+  if (!apiKey) {
+    // eslint-disable-next-line no-console
+    console.error("[Helius Enhanced API] API key not configured.");
+    return [];
+  }
 
-export async function getWalletTransactionHistory(address: string): Promise<number> {
   try {
-    const result = await callHeliusRpc<SignatureInfo[]>("getSignaturesForAddress", [
-      address,
-      { limit: 1000 },
-    ]);
-
-    if (!result) {
-      return -1; // API error, not actual 0 transactions
+    const limit = Math.min(options?.limit ?? 100, 100);
+    const url = new URL(
+      `${HELIUS_API_BASE}/v0/addresses/${address}/transactions`,
+    );
+    url.searchParams.set("api-key", apiKey.trim());
+    url.searchParams.set("limit", String(limit));
+    if (options?.before) {
+      url.searchParams.set("before", options.before);
     }
 
-    const count = Array.isArray(result) ? result.length : 0;
-    return count;
+    const response = await fetch(url.toString());
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // eslint-disable-next-line no-console
+      console.error(
+        `[Helius Enhanced API] HTTP ${response.status}:`,
+        errorText.substring(0, 200),
+      );
+      return [];
+    }
+
+    const data = await response.json();
+    return Array.isArray(data) ? (data as EnhancedTransaction[]) : [];
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error(`[getWalletTransactionHistory] Exception for ${address}:`, error);
-    return -1; // API error
+    console.error(
+      `[Helius Enhanced API] Exception:`,
+      error instanceof Error ? error.message : String(error),
+    );
+    return [];
   }
 }
 
-// ──────────────────────────────────────────────────────────────
-// Production Grade: First Transaction & Wallet Age Detection
-// ──────────────────────────────────────────────────────────────
-
 /**
- * Fetch the oldest transaction signature for a wallet.
- * Uses `before` pagination to walk backwards, or fetches last page.
- * Returns the oldest SignatureInfo or null.
+ * Unified wallet transaction data fetcher using Helius Enhanced Transactions API.
+ * Replaces BOTH getWalletTransactionHistory AND getFirstTransaction.
  *
- * Hidden Killer Feature: Logs funding source to server console.
- * This is NEVER exposed to the client.
+ * Single API flow returns:
+ *   - Transaction count (paginated, up to 1000)
+ *   - First (oldest) transaction info for wallet age calculation
+ *   - Funding source detection from parsed nativeTransfers
+ *
+ * Returns transactionCount = -1 on API failure (to distinguish from actual 0 txs).
  */
-export async function getFirstTransaction(address: string): Promise<{
+export async function getWalletTransactionData(address: string): Promise<{
+  transactionCount: number;
   firstTxSignature: string | null;
   firstTxBlockTime: number | null;
   approxWalletAgeDays: number | null;
 }> {
   try {
-    // Strategy: Fetch oldest signatures by using `limit: 1` with no `before` cursor
-    // then paginate backwards. For efficiency, we fetch a batch and take the last one.
-    const result = await callHeliusRpc<SignatureInfo[]>("getSignaturesForAddress", [
-      address,
-      { limit: 1000 }, // Fetch max batch
-    ]);
+    const allTransactions: EnhancedTransaction[] = [];
 
-    if (!result || !Array.isArray(result) || result.length === 0) {
-      return { firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null };
+    // Paginate through Enhanced API (100 per page, up to 1000 total)
+    const MAX_PAGES = 10;
+    const PAGE_SIZE = 100;
+    let cursor: string | undefined;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const batch = await fetchEnhancedTransactionPage(address, {
+        limit: PAGE_SIZE,
+        before: cursor,
+      });
+
+      if (batch.length === 0) break;
+
+      allTransactions.push(...batch);
+      cursor = batch[batch.length - 1].signature;
+
+      // If we got fewer than PAGE_SIZE, we've reached the end
+      if (batch.length < PAGE_SIZE) break;
     }
 
-    // The API returns newest-first, so the LAST element is the oldest in this batch
-    const oldestInBatch = result[result.length - 1];
+    const transactionCount = allTransactions.length;
 
-    // If we got exactly 1000 results, there may be more older ones.
-    // Paginate backwards using the oldest signature as `before` cursor.
-    let oldest = oldestInBatch;
-    if (result.length === 1000) {
-      let cursor = oldest.signature;
-      let keepPaging = true;
-      while (keepPaging) {
-        const olderBatch = await callHeliusRpc<SignatureInfo[]>("getSignaturesForAddress", [
-          address,
-          { limit: 1000, before: cursor },
-        ]);
-        if (!olderBatch || !Array.isArray(olderBatch) || olderBatch.length === 0) {
-          keepPaging = false;
-        } else {
-          oldest = olderBatch[olderBatch.length - 1];
-          cursor = oldest.signature;
-          if (olderBatch.length < 1000) keepPaging = false; // Last page
-        }
-      }
+    if (transactionCount === 0) {
+      return {
+        transactionCount: 0,
+        firstTxSignature: null,
+        firstTxBlockTime: null,
+        approxWalletAgeDays: null,
+      };
     }
 
-    const firstTxSignature = oldest.signature;
-    const firstTxBlockTime = oldest.blockTime ?? null;
+    // Enhanced API returns newest-first, so the last element is the oldest
+    const oldestTx = allTransactions[allTransactions.length - 1];
+    const firstTxSignature = oldestTx.signature;
+    const firstTxBlockTime = oldestTx.timestamp ?? null;
 
     // Calculate approx wallet age in days
     let approxWalletAgeDays: number | null = null;
     if (firstTxBlockTime) {
+      // Helius Enhanced API returns timestamp in seconds (Unix epoch)
       const ageMs = Date.now() - firstTxBlockTime * 1000;
       approxWalletAgeDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
     }
 
-    // ── HIDDEN KILLER FEATURE: Funding Source Log ──
-    // Attempt to read the first transaction to identify the funder.
+    // ── HIDDEN KILLER FEATURE: Funding Source Detection ──
+    // Extracted from parsed nativeTransfers — no separate getTransaction RPC call needed!
     // This is logged server-side ONLY. Never sent to client.
-    if (firstTxSignature) {
-      try {
-        type ParsedTxResponse = {
-          transaction?: {
-            message?: {
-              accountKeys?: Array<{ pubkey: string; signer: boolean; writable: boolean } | string>;
-            };
-          };
-          meta?: {
-            preBalances?: number[];
-            postBalances?: number[];
-          };
-        };
-
-        const txDetail = await callHeliusRpc<ParsedTxResponse>("getTransaction", [
-          firstTxSignature,
-          { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 },
-        ]);
-
-        if (txDetail?.transaction?.message?.accountKeys) {
-          const accountKeys = txDetail.transaction.message.accountKeys;
-          // The first signer that is NOT the wallet itself is likely the funder
-          const funder = accountKeys.find((key) => {
-            if (typeof key === "string") return key !== address;
-            return key.signer && key.pubkey !== address;
-          });
-          const funderAddress = typeof funder === "string" ? funder : funder?.pubkey;
-
-          if (funderAddress) {
-            // eslint-disable-next-line no-console
-            console.log(
-              `[FUNDING_SOURCE_LOG] Wallet: ${address} funded by ${funderAddress} via ${firstTxSignature}`,
-            );
-          } else {
-            // eslint-disable-next-line no-console
-            console.log(
-              `[FUNDING_SOURCE_LOG] Wallet: ${address} self-funded or funder undetectable. First tx: ${firstTxSignature}`,
-            );
-          }
-        }
-      } catch {
-        // Non-critical: funding source detection is best-effort
+    if (oldestTx.nativeTransfers && oldestTx.nativeTransfers.length > 0) {
+      const incomingTransfer = oldestTx.nativeTransfers.find(
+        (t) => t.toUserAccount === address && t.fromUserAccount !== address,
+      );
+      if (incomingTransfer) {
         // eslint-disable-next-line no-console
-        console.log(`[FUNDING_SOURCE_LOG] Wallet: ${address} - failed to parse first tx ${firstTxSignature}`);
+        console.log(
+          `[FUNDING_SOURCE_LOG] Wallet: ${address} funded by ${incomingTransfer.fromUserAccount} via ${firstTxSignature}`,
+        );
+      } else {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[FUNDING_SOURCE_LOG] Wallet: ${address} self-funded or funder undetectable. First tx: ${firstTxSignature}`,
+        );
       }
     }
 
-    return { firstTxSignature, firstTxBlockTime, approxWalletAgeDays };
+    return {
+      transactionCount,
+      firstTxSignature,
+      firstTxBlockTime,
+      approxWalletAgeDays,
+    };
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error(`[getFirstTransaction] Exception for ${address}:`, error);
-    return { firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null };
+    console.error(`[getWalletTransactionData] Exception for ${address}:`, error);
+    return {
+      transactionCount: -1, // API error, not actual 0 transactions
+      firstTxSignature: null,
+      firstTxBlockTime: null,
+      approxWalletAgeDays: null,
+    };
   }
 }
