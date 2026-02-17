@@ -9,7 +9,7 @@ import {
 } from "@/lib/helius";
 import { getMatches } from "@/lib/match-engine";
 // GÜNCELLEME: Supabase upsert fonksiyonunu ekledik
-import { getUserProfile, isUserRegistered, upsertUser } from "@/lib/db";
+import { getUserProfile, isUserRegistered, upsertUser, findMatches, updateMatchSnapshot } from "@/lib/db";
 import type {
   AnalyzeWalletResult,
   AnalyzeWalletResponse,
@@ -65,18 +65,6 @@ function computeTokenCount(items: DasAsset[]): number {
   ).length;
 }
 
-function computeNftCount(items: DasAsset[]): number {
-  // Count NFTs and non-fungible assets
-  return items.filter(
-    (item) =>
-      item.interface === "V1_NFT" ||
-      item.interface === "V2_NFT" ||
-      item.interface === "ProgrammableNFT" ||
-      (item.interface !== "FungibleToken" &&
-        item.interface !== "FungibleAsset" &&
-        item.interface !== undefined),
-  ).length;
-}
 
 function computeTokenDiversity(items: DasAsset[]): number {
   // Count unique token types by their interface and id
@@ -106,10 +94,10 @@ function calculateScore(
   // Aktivite Puanı: Max 40 puan
   let activityScore = 0;
 
-  // Eğer transactionCount -1 gelirse (API hatası) veya 0 gelirse ama bakiye > 1 SOL ise, teknik hata olabilir
+  // transactionCount === -1: API hatası (getWalletTransactionData sentinel değeri)
+  // transactionCount === 0: Gerçekten 0 işlem — artık isLikelyApiError mantığı yok
   const isApiError = transactionCount === -1;
-  const isLikelyApiError = transactionCount === 0 && solBalance > 1;
-  const effectiveTransactionCount = isApiError || isLikelyApiError ? 100 : transactionCount;
+  const effectiveTransactionCount = isApiError ? 0 : transactionCount;
 
   if (effectiveTransactionCount >= 1000) {
     activityScore = 40; // OG/Whale
@@ -123,14 +111,14 @@ function calculateScore(
   const diversityScore = tokenDiversity > 5 ? 20 : Math.min(20, tokenDiversity * 4);
 
   // Ceza: İşlem sayısı < 5 ise (yeni cüzdan/Fresh), toplam skordan -20 puan düş
-  const penalty =
-    effectiveTransactionCount < 5 && !isApiError && !isLikelyApiError ? 20 : 0;
+  // API hatasında ceza uygulanmaz
+  const penalty = effectiveTransactionCount < 5 && !isApiError ? 20 : 0;
 
   const total = Math.max(0, Math.min(100, balanceScore + activityScore + diversityScore - penalty));
 
   // Açıklama oluştur
   const explanations: string[] = [];
-  if (isApiError || isLikelyApiError) {
+  if (isApiError) {
     explanations.push("İşlem geçmişi alınamadı (teknik sorun)");
   }
   if (penalty > 0) {
@@ -143,7 +131,7 @@ function calculateScore(
     explanations.push("OG/Whale aktivite seviyesi");
   } else if (activityScore >= 20) {
     explanations.push("Aktif kullanıcı");
-  } else if (activityScore >= 10 && !isLikelyApiError) {
+  } else if (activityScore >= 10 && !isApiError) {
     explanations.push("Orta seviye aktivite");
   }
   if (diversityScore >= 15) {
@@ -353,7 +341,7 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     const scoreLabel = trustScore >= 80 ? "High Trust" : trustScore >= 50 ? "Medium Trust" : "Low Trust";
 
     // Opt-In Network Architecture - Check if user is registered (In-Memory Check removed, now relies on DB sync)
-    const isRegistered = isUserRegistered(trimmed);
+    const isRegistered = await isUserRegistered(trimmed);
 
     // ──────────────────────────────────────────────────────────────
     // GÜNCELLEME: SUPABASE KAYIT (Kalıcı Hafıza)
@@ -443,12 +431,8 @@ export async function joinNetwork(
       };
     }
 
-    // GÜNCELLEME: upsertUser zaten import edildi, tekrar importa gerek yok ama
-    // structure korumak için burada getUserProfile'i çekiyoruz
-    const { getUserProfile } = await import("@/lib/db");
-    
     // Security & Stability - Check if user already exists to preserve joinedAt
-    const existingUser = getUserProfile(address.trim());
+    const existingUser = await getUserProfile(address.trim());
     const isFirstJoin = !existingUser;
     const joinedAt = existingUser?.joinedAt ?? Date.now(); // Immutable Join Date
 
@@ -524,14 +508,16 @@ export async function joinNetwork(
       matchFilters: existingUser?.matchFilters, // Preserve reciprocity filters
     };
 
-    // GÜNCELLEME: Veritabanına yaz (Supabase)
-    // joinNetwork logic'i UserProfile nesnesi kullanıyor ama DB upsert Partial alıyor.
-    // Burada uyumluluk için spread ile geçiriyoruz.
+    // GÜNCELLEME: Veritabanına yaz (Supabase) — tüm profil alanları
     const success = await upsertUser(address.trim(), {
         trust_score: userProfile.trustScore,
         level: userProfile.role,
-        // Diğer profil alanları Supabase şemasında varsa buraya eklenebilir
-        // Ancak şimdilik MVP için trust_score ve level kritik.
+        username: userProfile.username,
+        activeBadges: userProfile.activeBadges,
+        socialProof: userProfile.socialProof,
+        identityState: userProfile.identityState,
+        is_opted_in: true,
+        intent: userProfile.intent,
     });
 
     // Not: success UserData | null döner, bu yüzden truthy kontrolü yeterli
@@ -570,11 +556,10 @@ export async function getNetworkMatches(
   "use server";
 
   try {
-    const { findMatches, getUserProfile, updateMatchSnapshot } = await import("@/lib/db");
     const { calculateMatchScore } = await import("@/lib/match-engine");
 
     // Get user profile to check cache
-    const user = getUserProfile(userAddress);
+    const user = await getUserProfile(userAddress);
     if (!user) {
       return []; // Not registered
     }
@@ -596,7 +581,7 @@ export async function getNetworkMatches(
     }
 
     // Cache expired or doesn't exist - Calculate fresh matches
-    const registeredUsers = findMatches(userAddress, 20);
+    const registeredUsers = await findMatches(userAddress, 20);
 
     if (registeredUsers.length === 0) {
       return []; // No matches found
@@ -695,8 +680,11 @@ export async function getNetworkMatches(
       return cleanProfile;
     });
 
-    // Security & Stability - Update cache snapshot
-    updateMatchSnapshot(userAddress, cleanedProfiles);
+    // Security & Stability - Update cache snapshot (fire-and-forget with error handling)
+    updateMatchSnapshot(userAddress, cleanedProfiles).catch((err) =>
+      // eslint-disable-next-line no-console
+      console.error("[getNetworkMatches] Failed to update match snapshot:", err),
+    );
     // eslint-disable-next-line no-console
     console.log(
       `[getNetworkMatches] Calculated fresh matches for ${userAddress} and cached snapshot`,
@@ -721,9 +709,7 @@ export async function verifyPayment(
   "use server";
 
   try {
-    const { getUserProfile, upsertUser } = await import("@/lib/db");
-
-    const user = getUserProfile(address.trim());
+    const user = await getUserProfile(address.trim());
     if (!user) {
       return {
         success: false,
@@ -731,21 +717,11 @@ export async function verifyPayment(
       };
     }
 
-    // Identity Hierarchy Logic: VERIFIED is the highest state
-    // Once VERIFIED, cannot be downgraded
-    const newIdentityState: IdentityState =
-      user.identityState === "VERIFIED" ? "VERIFIED" : "VERIFIED";
+    // Identity Hierarchy Logic: VERIFIED is the highest state, cannot be downgraded
+    const newIdentityState: IdentityState = "VERIFIED";
 
-    const updatedProfile: UserProfile = {
-      ...user,
-      identityState: newIdentityState,
-      lastActiveAt: Date.now(),
-    };
-
-    // GÜNCELLEME: Supabase upsert
     const success = await upsertUser(address.trim(), {
-        // level veya trust_score'u da burada update edebiliriz gerekirse
-        // Ancak schema'da identityState yoksa eklenmeli veya ignore edilir
+        identityState: newIdentityState,
     });
 
     if (success) {
@@ -783,9 +759,7 @@ export async function linkSocial(
   "use server";
 
   try {
-    const { getUserProfile, upsertUser } = await import("@/lib/db");
-
-    const user = getUserProfile(address.trim());
+    const user = await getUserProfile(address.trim());
     if (!user) {
       return {
         success: false,
@@ -793,27 +767,15 @@ export async function linkSocial(
       };
     }
 
-    // Identity Hierarchy Logic:
-    // - If VERIFIED, keep VERIFIED (cannot downgrade)
-    // - If REACHABLE, keep REACHABLE (cannot downgrade)
-    // - If GHOST or undefined, upgrade to REACHABLE
+    // Identity Hierarchy Logic: one-way escalation, cannot downgrade
     const currentState = user.identityState ?? "GHOST";
     const newIdentityState: IdentityState =
-      currentState === "VERIFIED"
-        ? "VERIFIED" // Cannot downgrade from VERIFIED
-        : currentState === "REACHABLE"
-          ? "REACHABLE" // Cannot downgrade from REACHABLE
-          : "REACHABLE"; // Upgrade from GHOST to REACHABLE
+      currentState === "VERIFIED" || currentState === "REACHABLE"
+        ? currentState
+        : "REACHABLE"; // Upgrade from GHOST to REACHABLE
 
-    const updatedProfile: UserProfile = {
-      ...user,
-      identityState: newIdentityState,
-      lastActiveAt: Date.now(),
-    };
-
-    // GÜNCELLEME: Supabase upsert
     const success = await upsertUser(address.trim(), {
-         // Identity update logic Supabase schema'ya göre eklenebilir
+        identityState: newIdentityState,
     });
 
     if (success) {

@@ -1,5 +1,8 @@
 export type BadgeId = "whale" | "dev" | "og_wallet" | "community_trusted" | "governor";
 
+// Tek yerde tanımlanan Role tipi — MatchProfile, UserProfile ve NetworkAgent tarafından paylaşılır
+export type Role = "Dev" | "Artist" | "Marketing" | "Whale" | "Community";
+
 export type UserIntent = "BUILD_SQUAD" | "FIND_FUNDING" | "HIRE_TALENT" | "JOIN_PROJECT" | "NETWORK";
 
 // Identity Hierarchy & Sorting - CTO Tuning
@@ -116,7 +119,7 @@ export type WalletAnalysis = {
 export type MatchProfile = {
   id: string;
   username: string;
-  role: "Dev" | "Artist" | "Marketing" | "Whale" | "Community";
+  role: Role;
   trustScore: number;
   tags: string[];
   matchReason: string;
@@ -125,8 +128,8 @@ export type MatchProfile = {
   socialProof: SocialProof;
   activeBadges: Badge[];
   confidenceBreakdown: ConfidenceBreakdown;
-  // v2: Intent Layer
-  intent: UserIntent;
+  // v2: Intent Layer — optional, kullanıcı seçmediyse undefined olabilir
+  intent?: UserIntent;
   // Identity Hierarchy & Sorting
   identityState?: IdentityState;
   // Mentor Logic: Structured match reasons (POSITIVE + MISSING signals)
@@ -138,7 +141,7 @@ export type UserProfile = {
   id: string;
   address: string;
   username: string;
-  role: "Dev" | "Artist" | "Marketing" | "Whale" | "Community";
+  role: Role;
   trustScore: number;
   tags: string[];
   intent: UserIntent;
@@ -173,7 +176,7 @@ export type NetworkAgent = {
   id: string;
   address: string;
   username: string;
-  role: "Dev" | "Artist" | "Marketing" | "Whale" | "Community";
+  role: Role;
   trustScore: number;
   identityState?: IdentityState;
   activeBadges: Badge[];

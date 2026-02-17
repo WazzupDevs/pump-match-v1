@@ -1,5 +1,11 @@
 import { supabase } from './supabase';
-import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters } from '@/types';
+import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters, Role } from '@/types';
+
+const VALID_ROLES: Role[] = ["Dev", "Artist", "Marketing", "Whale", "Community"];
+
+function toValidRole(value: unknown): Role {
+  return VALID_ROLES.includes(value as Role) ? (value as Role) : "Community";
+}
 
 // ── YARDIMCI: Tip Dönüşümleri ──
 // Supabase'den gelen veriyi bizim UserProfile tipine çevirir
@@ -8,7 +14,7 @@ function mapDbUserToProfile(dbUser: Record<string, unknown>): UserProfile {
     id: dbUser.id as string,
     address: dbUser.wallet_address as string,
     username: (dbUser.username as string) || 'Anon',
-    role: (dbUser.level as UserProfile['role']) || 'Community',
+    role: toValidRole(dbUser.level),
     trustScore: dbUser.trust_score as number,
     tags: (dbUser.tags as string[]) ?? [],
     intent: dbUser.intent as UserProfile['intent'],
@@ -111,13 +117,18 @@ export async function findMatches(
 
 // Snapshot güncelleme
 export async function updateMatchSnapshot(wallet: string, matches: MatchProfile[]) {
-  await supabase
+  const { error } = await supabase
     .from('users')
     .update({
       cached_matches: matches,
       last_match_snapshot_at: Date.now(),
     })
     .eq('wallet_address', wallet);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[updateMatchSnapshot] Supabase update error:', error);
+  }
 }
 
 // ── 3. GOD MODE / SEARCH ──
@@ -138,7 +149,8 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
 
   if (filters.badgeFilters && filters.badgeFilters.length > 0) {
     for (const badgeId of filters.badgeFilters) {
-      query = query.contains('active_badges', JSON.stringify([{ id: badgeId }]));
+      // JSONB array containment: pass array of objects directly, not JSON string
+      query = query.contains('active_badges', [{ id: badgeId }]);
     }
   }
 
@@ -150,7 +162,7 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
     id: user.id as string,
     address: user.wallet_address as string,
     username: (user.username as string) || 'Anon',
-    role: user.level as NetworkAgent['role'],
+    role: toValidRole(user.level),
     trustScore: user.trust_score as number,
     identityState: user.identity_state as NetworkAgent['identityState'],
     activeBadges: (user.active_badges as NetworkAgent['activeBadges']) || [],
