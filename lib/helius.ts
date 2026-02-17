@@ -224,6 +224,50 @@ export async function getSolBalance(address: string): Promise<number> {
 }
 
 // ──────────────────────────────────────────────────────────────
+// Helius DAS getAsset — Single Asset Lookup (Arena Truth Gate)
+// ──────────────────────────────────────────────────────────────
+
+export type HeliusAssetInfo = {
+  id: string;
+  interface: string;
+  content?: {
+    metadata?: {
+      name?: string;
+      symbol?: string;
+      update_authority?: string;
+    };
+  };
+  token_info?: {
+    supply?: number;
+    decimals?: number;
+    price_info?: {
+      price_per_token?: number;
+      total_price?: number;
+    };
+  };
+  authorities?: Array<{
+    address: string;
+    scopes: string[];
+  }>;
+};
+
+/**
+ * Helius DAS getAsset — Fetch a single asset by mint address.
+ * Used by the Arena engine to verify on-chain token existence and metadata.
+ * Returns null on error.
+ */
+export async function getAsset(mintAddress: string): Promise<HeliusAssetInfo | null> {
+  try {
+    const result = await callHeliusRpc<HeliusAssetInfo>("getAsset", { id: mintAddress });
+    return result;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[getAsset] Exception for ${mintAddress}:`, error);
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
 // Helius Enhanced Transactions API — Unified Transaction Fetcher
 // Replaces the old N+1 pattern:
 //   OLD: getSignaturesForAddress → loop getParsedTransaction

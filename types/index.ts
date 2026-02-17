@@ -185,3 +185,61 @@ export type AnalyzeWalletResponse = {
   walletAnalysis: WalletAnalysis; // Pump Match - Full analysis sent to client
   matches: MatchProfile[];
 };
+
+// ──────────────────────────────────────────────────────────────
+// Arena Financial Snapshot Engine
+// ──────────────────────────────────────────────────────────────
+
+export type ArenaProjectStatus = "active" | "ghost" | "rugged";
+
+export type ClaimTier = "founder" | "community";
+
+export type SquadProject = {
+  id: string;
+  name: string;
+  mint_address: string;
+  claimed_by: string;
+  symbol: string;
+  status: ArenaProjectStatus;
+  claim_tier: ClaimTier;
+  is_renounced: boolean;
+  update_authority: string | null;
+  market_cap: number | null;
+  fdv: number | null;
+  liquidity_usd: number | null;
+  volume_24h: number | null;
+  last_valid_mc: number | null;
+  last_mc_update: string | null; // ISO timestamp
+  created_at: string;
+};
+
+export type DexScreenerPair = {
+  chainId: string;
+  dexId: string;
+  url: string;
+  pairAddress: string;
+  baseToken: {
+    address: string;
+    name: string;
+    symbol: string;
+  };
+  quoteToken: {
+    address: string;
+    name: string;
+    symbol: string;
+  };
+  priceUsd?: string;
+  volume?: {
+    h24?: number;
+    h6?: number;
+    h1?: number;
+    m5?: number;
+  };
+  liquidity?: {
+    usd?: number;
+    base?: number;
+    quote?: number;
+  };
+  fdv?: number;
+  marketCap?: number;
+};

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import {
   Line,
   LineChart,
@@ -11,9 +11,11 @@ import {
 } from "recharts";
 import { Fish, Dice5, Waves, Bot, History, Sparkles, Lock, X, Users, Wallet, Layers, Activity, AlertTriangle, Scan, Calendar, SlidersHorizontal, Code, Rocket, DollarSign, BadgeCheck, SearchX, ShieldCheck, Zap } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { analyzeWallet, getNetworkMatches, joinNetwork, searchNetworkAction } from "@/app/actions/analyzeWallet";
+import { analyzeWallet, getNetworkMatches, getUserAction, searchNetworkAction } from "@/app/actions/analyzeWallet";
 import type { MatchProfile, NetworkAgent, SearchFilters, UserIntent, WalletAnalysis } from "@/types";
 import { MatchCard } from "@/components/match-card";
+import { JoinNetworkModal } from "@/components/JoinNetworkModal";
+import { ArenaLeaderboard } from "@/components/ArenaLeaderboard";
 import { WalletButton } from "@/components/ui/wallet-button";
 import { FilterSheet } from "@/components/ui/filter-sheet";
 import { Navbar } from "@/components/ui/navbar";
@@ -42,14 +44,112 @@ export default function Home() {
   // v2: Intent Layer - Onboarding Modal State
   const [showIntentModal, setShowIntentModal] = useState(false);
   const [userIntent, setUserIntent] = useState<UserIntent | null>(null);
-  // Opt-In Network Architecture - Join Network State
-  const [isJoining, setIsJoining] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const [username, setUsername] = useState("");
+  // Opt-In Network Architecture - Join Network Modal State
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   // God Mode Discovery - Filter & Search
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<NetworkAgent[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  // Persistent User Sessions - Auto-sync on wallet connect
+  const [isSyncing, setIsSyncing] = useState(false);
+  // Network Dopamine Layer - Success toast
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Auto-dismiss toast after 5 seconds
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // ──────────────────────────────────────────────────────────────
+  // Persistent User Sessions: Auto-fetch user profile on wallet connect
+  // ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    // Reset state when wallet disconnects
+    if (!connected || !publicKey) {
+      setAnalysis(null);
+      setMatches([]);
+      setQuery("");
+      setIsSyncing(false);
+      return;
+    }
+
+    // When wallet connects, check if user exists in DB
+    const checkUserSession = async () => {
+      const walletAddress = publicKey.toBase58();
+      
+      // Don't sync if we already have analysis for this address
+      // Note: We check analysis?.address which may be stale, but that's okay
+      // because we only want to prevent re-syncing the same address
+      if (analysis?.address === walletAddress) {
+        return;
+      }
+
+      setIsSyncing(true);
+      try {
+        const userProfile = await getUserAction(walletAddress);
+        
+        if (userProfile) {
+          // User exists: Automatically show their dashboard (skip landing)
+          setQuery(walletAddress);
+          // Call handleAnalyze directly with the address
+          const address = walletAddress.trim();
+          setError(null);
+          setLoading(true);
+          setLoadingPhase("Restoring session...");
+
+          try {
+            const response = await analyzeWallet(address, userIntent || undefined);
+            const walletAnalysis = response.walletAnalysis;
+            
+            if (!userIntent) {
+              setShowIntentModal(true);
+            }
+            
+            setAnalysis(walletAnalysis);
+            
+            // Opt-In Network Architecture - If registered, fetch network matches
+            if (walletAnalysis.isRegistered) {
+              setLoadingPhase("Fetching Network Matches...");
+              try {
+                const networkMatches = await getNetworkMatches(walletAnalysis.address, walletAnalysis);
+                setMatches(networkMatches);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error("Failed to fetch network matches:", err);
+                setMatches(response.matches); // Fallback to mock matches
+              }
+            } else {
+              setMatches(response.matches);
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(err);
+            const errorMsg = err instanceof Error ? err.message : "An error occurred during analysis.";
+            setError(errorMsg);
+            setAnalysis(null);
+            setMatches([]);
+          } finally {
+            setLoading(false);
+            setLoadingPhase("");
+          }
+        } else {
+          // User doesn't exist: Stay on landing page (allow manual Analyze)
+          // No action needed - user can click "Analyze My Wallet" manually
+        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error("[Persistent Session] Failed to fetch user profile:", error);
+        // On error, stay on landing page
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    checkUserSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, publicKey?.toBase58()]); // Only run when wallet connection state changes
 
   const activityChartData = useMemo(() => {
     if (!analysis) return [];
@@ -164,6 +264,32 @@ export default function Home() {
       <Navbar>
         <WalletButton />
       </Navbar>
+
+      {/* Network Dopamine Layer: Success Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-md w-[calc(100%-2rem)] animate-in slide-in-from-bottom-4 fade-in duration-300">
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-500/40 bg-zinc-900/95 backdrop-blur-lg px-4 py-3 shadow-xl shadow-emerald-500/10">
+            <span className="text-lg flex-shrink-0">🚀</span>
+            <p className="text-sm text-slate-200 leading-snug flex-1">{toast}</p>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="flex-shrink-0 rounded-full p-1 text-slate-500 hover:text-slate-200 transition-colors"
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Persistent User Sessions: Syncing Indicator */}
+      {isSyncing && (
+        <div className="fixed top-20 right-4 md:top-24 md:right-6 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-500/30 bg-slate-900/90 backdrop-blur-sm shadow-lg shadow-emerald-500/10">
+          <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-xs text-emerald-400/80 font-medium">Syncing...</span>
+        </div>
+      )}
 
       <main className="w-full max-w-5xl mx-auto px-4 pt-24 pb-16 md:pt-28 md:pb-24">
         {/* HERO SECTION */}
@@ -335,7 +461,11 @@ export default function Home() {
         {/* ANALYSIS */}
         {analysis && !searchResults && (
           <section className="mt-12 md:mt-16">
-            <div className="mx-auto max-w-3xl rounded-3xl border border-emerald-500/25 bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/90 p-6 md:p-8 shadow-[0_0_60px_rgba(34,197,94,0.45)] shadow-emerald-500/30">
+            <div className={`mx-auto max-w-3xl rounded-3xl border bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/90 p-6 md:p-8 ${
+              analysis.isRegistered
+                ? "border-emerald-500/40 shadow-[0_0_60px_rgba(34,197,94,0.55)] animate-[pulse_3s_ease-in-out_infinite]"
+                : "border-emerald-500/25 shadow-[0_0_60px_rgba(34,197,94,0.45)] shadow-emerald-500/30"
+            }`}>
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 rounded-full bg-emerald-500/10 border border-emerald-400/70 flex items-center justify-center">
@@ -345,9 +475,17 @@ export default function Home() {
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                       TRUST ANALYSIS
                     </p>
-                    <p className="text-sm text-slate-300">
-                      {formatAddress(analysis.address)}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-slate-300">
+                        {formatAddress(analysis.address)}
+                      </p>
+                      {analysis.isRegistered && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                          <ShieldCheck className="h-3 w-3" />
+                          Verified Agent
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <span className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-[10px] font-semibold tracking-wide text-green-400">
@@ -382,7 +520,7 @@ export default function Home() {
                             fill="none"
                             strokeDasharray="314"
                             strokeDashoffset={
-                              314 - (314 * analysis.trustScore) / 100
+                              314 - (314 * Math.min(98, analysis.trustScore + (analysis.isRegistered ? 5 : 0))) / 100
                             }
                             className="transition-all duration-500 ease-out"
                             stroke={
@@ -405,13 +543,18 @@ export default function Home() {
                                 : "text-rose-400"
                             }`}
                           >
-                            {analysis.trustScore}
+                            {Math.min(98, analysis.trustScore + (analysis.isRegistered ? 5 : 0))}
                           </span>
                         </div>
                       </div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-2 text-center">
                         TRUST SCORE
                       </p>
+                      {analysis.isRegistered && (
+                        <p className="text-[10px] text-emerald-400 font-semibold mt-1 text-center animate-pulse">
+                          +5 Network Bonus
+                        </p>
+                      )}
                     </div>
                     <div className="flex-1 w-full">
                       <p className="text-[10px] text-slate-500/60 leading-tight mb-4">
@@ -635,6 +778,39 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+
+              {/* ── Opt-In Network: Join CTA / Active Agent Status ── */}
+              {!analysis.isRegistered ? (
+                <button
+                  type="button"
+                  onClick={() => setIsJoinModalOpen(true)}
+                  className="w-full mt-5 bg-gradient-to-r from-emerald-500 to-emerald-400 text-black font-semibold py-3 rounded-xl shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99] transition-all"
+                >
+                  Join Network &amp; Find Squad
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsJoinModalOpen(true)}
+                  className="w-full mt-5 border border-emerald-500/30 bg-emerald-500/5 rounded-xl p-3 cursor-pointer hover:border-emerald-400 transition-colors text-left"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-emerald-400 font-medium text-sm">
+                        Active Network Agent
+                      </p>
+                      {analysis.intent && (
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          Intent: {analysis.intent.replace(/_/g, " ")}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">
+                      Edit
+                    </span>
+                  </div>
+                </button>
+              )}
             </div>
           </section>
         )}
@@ -672,17 +848,17 @@ export default function Home() {
                     Increase system activity or earn community trust.
                   </p>
                   <div className="mt-6 p-4 rounded-lg border border-slate-700/50 bg-slate-800/30">
-                    <p className="text-xs text-slate-400 mb-2">💡 Tips to improve your score:</p>
+                    <p className="text-xs text-slate-400 mb-2">Tips to improve your score:</p>
                     <ul className="text-xs text-slate-500 space-y-1 text-left max-w-md mx-auto">
-                      <li>• Increase your SOL balance (System Score: {analysis.systemScore})</li>
-                      <li>• Make more transactions</li>
-                      <li>• Earn community trust (Social Score: {analysis.socialScore.toFixed(1)})</li>
-                      <li>• Build a consistent on-chain history</li>
+                      <li>- Increase your SOL balance (System Score: {analysis.systemScore})</li>
+                      <li>- Make more transactions</li>
+                      <li>- Earn community trust (Social Score: {analysis.socialScore.toFixed(1)})</li>
+                      <li>- Build a consistent on-chain history</li>
                     </ul>
                   </div>
                 </div>
               ) : !analysis.isRegistered ? (
-                /* STATE 1: Guest - Lock matches, show "Join Network" CTA */
+                /* STATE 1: Guest - Lock matches, prompt to Join via modal */
                 <div className="mx-auto max-w-2xl rounded-2xl border border-amber-500/20 bg-gradient-to-br from-slate-950 via-amber-950/10 to-slate-900/90 p-8 md:p-12 text-center shadow-lg shadow-amber-500/10">
                   <div className="mb-6">
                     <div className="inline-flex items-center justify-center w-20 h-20 rounded-full border-2 border-amber-500/50 bg-amber-500/10 mb-4">
@@ -695,58 +871,14 @@ export default function Home() {
                   <p className="text-sm md:text-base text-slate-300 mb-6 leading-relaxed">
                     You&apos;re viewing preview matches. Join the Pump Match Network to unlock real connections and find your perfect squad.
                   </p>
-                  
-                  {/* Username Input */}
-                  <div className="mb-6">
-                    <input
-                      type="text"
-                      placeholder="Choose a username"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      className="w-full max-w-xs mx-auto px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  
-                  {/* Join Network Button */}
                   <button
-                    onClick={async () => {
-                      if (!analysis || !userIntent) {
-                        setJoinError("Please select an intent first");
-                        return;
-                      }
-                      if (!username.trim()) {
-                        setJoinError("Please enter a username");
-                        return;
-                      }
-                      
-                      setIsJoining(true);
-                      setJoinError(null);
-                      
-                      try {
-                        const result = await joinNetwork(analysis.address, username.trim(), analysis);
-                        if (result.success) {
-                          // Refresh analysis to get isRegistered = true
-                          await handleAnalyze();
-                        } else {
-                          setJoinError(result.message);
-                        }
-                      } catch (err) {
-                        setJoinError("Failed to join network. Please try again.");
-                      } finally {
-                        setIsJoining(false);
-                      }
-                    }}
-                    disabled={isJoining || !userIntent || !username.trim()}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-amber-500 text-slate-950 font-semibold hover:bg-amber-400 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    type="button"
+                    onClick={() => setIsJoinModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 text-black font-semibold hover:from-emerald-400 hover:to-emerald-300 transition-all shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99]"
                   >
                     <Users className="h-4 w-4" />
-                    {isJoining ? "Joining..." : "Join Pump Match Network"}
+                    Join Network &amp; Find Squad
                   </button>
-                  
-                  {joinError && (
-                    <p className="mt-4 text-sm text-red-400">{joinError}</p>
-                  )}
-                  
                   <p className="mt-6 text-xs text-slate-500">
                     By joining, you agree to be discoverable by other network members.
                   </p>
@@ -780,6 +912,14 @@ export default function Home() {
               )}
             </div>
           </section>
+        )}
+
+        {/* ARENA LEADERBOARD — Always visible when no search results */}
+        {!searchResults && (
+          <ArenaLeaderboard
+            walletAddress={publicKey?.toBase58()}
+            isOptedIn={analysis?.isRegistered}
+          />
         )}
 
         {/* v2: Intent Layer - Onboarding Modal */}
@@ -845,6 +985,43 @@ export default function Home() {
               </button>
             </div>
           </div>
+        )}
+        {/* Opt-In Network: Join / Update Intent Modal */}
+        {analysis && (
+          <JoinNetworkModal
+            address={analysis.address}
+            walletAnalysis={analysis}
+            isOpen={isJoinModalOpen}
+            onClose={() => setIsJoinModalOpen(false)}
+            currentIntent={analysis.intent?.replace(/_/g, " ")}
+            isEditing={analysis.isRegistered}
+            onSuccess={(intent) => {
+              // Update local state immediately (no full page reload)
+              setAnalysis((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      isRegistered: true,
+                      intent: intent as WalletAnalysis["intent"],
+                    }
+                  : prev,
+              );
+              // Network Dopamine Layer: Success toast
+              setToast("You are now discoverable! Your Trust Score has been boosted by the Network Protocol.");
+              // Re-fetch network matches now that user is opted in
+              if (analysis.address) {
+                getNetworkMatches(analysis.address, {
+                  ...analysis,
+                  isRegistered: true,
+                  intent: intent as WalletAnalysis["intent"],
+                })
+                  .then((networkMatches) => setMatches(networkMatches))
+                  .catch(() => {
+                    // Keep existing matches on error
+                  });
+              }
+            }}
+          />
         )}
         {/* God Mode Discovery: Filter Sheet */}
         <FilterSheet
