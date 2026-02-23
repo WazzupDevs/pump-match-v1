@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Twitter, Send } from "lucide-react";
 import confetti from "canvas-confetti";
-import { joinNetwork } from "@/app/actions/analyzeWallet";
-import type { WalletAnalysis } from "@/types";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { joinNetwork, updateProfileAction } from "@/app/actions/analyzeWallet";
+import type { SocialLinks, WalletAnalysis } from "@/types";
 
 function fireNetworkConfetti() {
   confetti({
@@ -40,6 +41,9 @@ interface JoinNetworkModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentIntent?: string;
+  currentUsername?: string;
+  currentTags?: string[];
+  currentSocialLinks?: SocialLinks;
   isEditing?: boolean;
   onSuccess: (intent: string) => void;
 }
@@ -50,9 +54,13 @@ export function JoinNetworkModal({
   isOpen,
   onClose,
   currentIntent,
+  currentUsername,
+  currentTags,
+  currentSocialLinks,
   isEditing = false,
   onSuccess,
 }: JoinNetworkModalProps) {
+  const { signMessage } = useWallet();
   // Determine initial selection from currentIntent
   const getInitialSelection = useCallback((): string => {
     if (!currentIntent) return "";
@@ -66,6 +74,10 @@ export function JoinNetworkModal({
       ? currentIntent
       : "",
   );
+  const [username, setUsername] = useState(currentUsername ?? "");
+  const [tagsInput, setTagsInput] = useState((currentTags ?? []).join(", "));
+  const [twitterHandle, setTwitterHandle] = useState(currentSocialLinks?.twitter ?? "");
+  const [telegramHandle, setTelegramHandle] = useState(currentSocialLinks?.telegram ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -79,9 +91,13 @@ export function JoinNetworkModal({
           ? currentIntent
           : "",
       );
+      setUsername(currentUsername ?? "");
+      setTagsInput((currentTags ?? []).join(", "));
+      setTwitterHandle(currentSocialLinks?.twitter ?? "");
+      setTelegramHandle(currentSocialLinks?.telegram ?? "");
       setSubmitError(null);
     }
-  }, [isOpen, currentIntent, getInitialSelection]);
+  }, [isOpen, currentIntent, currentUsername, currentTags, currentSocialLinks, getInitialSelection]);
 
   // Disable body scroll while open
   useEffect(() => {
@@ -126,7 +142,54 @@ export function JoinNetworkModal({
     setSubmitError(null);
 
     try {
-      // Build a WalletAnalysis copy with the selected intent baked in
+      // SECURITY (VULN-01): Sign a message to prove wallet ownership.
+      let signedMessage: { message: string; signature: string } | undefined;
+
+      if (signMessage) {
+        const timestamp = Date.now();
+        const action = isEditing ? "Update Profile" : "Join Pump Match Network";
+        const messageText = `${action}\nAddress: ${address}\nTimestamp: ${timestamp}`;
+        const messageBytes = new TextEncoder().encode(messageText);
+        const signatureBytes = await signMessage(messageBytes);
+        const signatureBase64 = btoa(String.fromCharCode(...signatureBytes));
+        signedMessage = { message: messageText, signature: signatureBase64 };
+      } else {
+        console.warn("[JoinNetworkModal] signMessage not available on this wallet.");
+      }
+
+      const socialLinks: SocialLinks = {
+        ...(twitterHandle.trim() ? { twitter: twitterHandle.trim().replace(/^@/, "") } : {}),
+        ...(telegramHandle.trim() ? { telegram: telegramHandle.trim().replace(/^@/, "") } : {}),
+      };
+
+      if (isEditing && signedMessage) {
+        // Edit mode: lightweight profile update (no WalletAnalysis re-fetch needed)
+        const parsedTags = tagsInput
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .slice(0, 10);
+
+        const result = await updateProfileAction(
+          address,
+          {
+            username: username.trim() || undefined,
+            tags: parsedTags.length > 0 ? parsedTags : undefined,
+            socialLinks: Object.keys(socialLinks).length > 0 ? socialLinks : undefined,
+          },
+          signedMessage,
+        );
+
+        if (result.success) {
+          onSuccess(resolvedIntent);
+          onClose();
+        } else {
+          setSubmitError(result.message);
+        }
+        return;
+      }
+
+      // First join: full joinNetwork with WalletAnalysis
       const analysisWithIntent: WalletAnalysis = {
         ...walletAnalysis,
         intent: resolvedIntent as WalletAnalysis["intent"],
@@ -134,8 +197,10 @@ export function JoinNetworkModal({
 
       const result = await joinNetwork(
         address,
-        walletAnalysis.scoreLabel || "Agent",
+        username.trim() || walletAnalysis.scoreLabel || "Agent",
         analysisWithIntent,
+        signedMessage,
+        Object.keys(socialLinks).length > 0 ? socialLinks : undefined,
       );
 
       if (result.success) {
@@ -147,7 +212,7 @@ export function JoinNetworkModal({
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[JoinNetworkModal] joinNetwork failed:", err);
+      console.error("[JoinNetworkModal] failed:", err);
       setSubmitError("Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -187,8 +252,23 @@ export function JoinNetworkModal({
             Choose your intent to become visible to other elite agents.
           </p>
 
+          {/* Username field */}
+          <div className="mt-5">
+            <label className="block text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-1.5">
+              Display Name
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              maxLength={32}
+              placeholder="Your on-chain alias (max 32 chars)"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+            />
+          </div>
+
           {/* Intent Chips */}
-          <div className="mt-6 grid grid-cols-2 gap-2.5">
+          <div className="mt-5 grid grid-cols-2 gap-2.5">
             {INTENT_PRESETS.map((preset) => {
               const isActive = selected === preset.label;
               return (
@@ -249,6 +329,63 @@ export function JoinNetworkModal({
               </p>
             </div>
           )}
+
+          {/* Tags (optional) */}
+          <div className="mt-4">
+            <label className="block text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-1.5">
+              Interests <span className="normal-case text-slate-600">(optional — comma separated)</span>
+            </label>
+            <input
+              type="text"
+              value={tagsInput}
+              onChange={(e) => setTagsInput(e.target.value)}
+              maxLength={200}
+              placeholder="e.g. NFT, DeFi, AI, Gaming"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+            />
+            {/* Live tag preview */}
+            {tagsInput.trim() && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {tagsInput.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 10).map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center rounded-md border border-slate-700/50 bg-slate-800/50 px-2 py-0.5 text-[10px] text-slate-300"
+                  >
+                    {tag.slice(0, 20)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Social Handles (optional) */}
+          <div className="mt-4 space-y-2.5">
+            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500">
+              Contact Handles <span className="normal-case text-slate-600">(optional)</span>
+            </p>
+            <div className="relative">
+              <Twitter className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-sky-400" />
+              <input
+                type="text"
+                value={twitterHandle}
+                onChange={(e) => setTwitterHandle(e.target.value)}
+                maxLength={32}
+                placeholder="@username"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 pl-9 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500/60 focus:ring-1 focus:ring-sky-500/30 transition-colors"
+              />
+            </div>
+            <div className="relative">
+              <Send className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" />
+              <input
+                type="text"
+                value={telegramHandle}
+                onChange={(e) => setTelegramHandle(e.target.value)}
+                maxLength={32}
+                placeholder="@username"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 pl-9 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-colors"
+              />
+            </div>
+          </div>
 
           {/* Error */}
           {submitError && (

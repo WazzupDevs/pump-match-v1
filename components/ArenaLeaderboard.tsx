@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Rocket,
@@ -17,6 +18,7 @@ import {
   type PowerSquadProject,
 } from "@/app/actions/arena";
 import { ClaimProjectModal } from "@/components/ClaimProjectModal";
+import { SquadMemberModal } from "@/components/SquadMemberModal";
 import { AgentCard } from "@/components/arena/agent-card";
 import { ProjectCard } from "@/components/arena/project-card";
 
@@ -42,6 +44,12 @@ export function ArenaLeaderboard({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [isClaimOpen, setIsClaimOpen] = useState(false);
+  const [squadModal, setSquadModal] = useState<{
+    projectId: string;
+    projectName: string;
+    founderWallet: string;
+  } | null>(null);
+  const { signMessage } = useWallet();
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -65,10 +73,27 @@ export function ArenaLeaderboard({
   }, [fetchData]);
 
   const handleManualSync = useCallback(async () => {
+    if (!walletAddress) return;
+
+    // SECURITY (VULN-04): Prove admin wallet ownership before triggering sync.
+    if (!signMessage) {
+      setSyncResult("Wallet does not support message signing.");
+      return;
+    }
+
     setIsSyncing(true);
     setSyncResult(null);
     try {
-      const result = await triggerManualSync();
+      const timestamp = Date.now();
+      const messageText = `Admin: Sync Arena Data\nAddress: ${walletAddress}\nTimestamp: ${timestamp}`;
+      const messageBytes = new TextEncoder().encode(messageText);
+      const signatureBytes = await signMessage(messageBytes);
+      const signatureBase64 = btoa(String.fromCharCode(...signatureBytes));
+
+      const result = await triggerManualSync(walletAddress, {
+        message: messageText,
+        signature: signatureBase64,
+      });
       if (result.success) {
         setSyncResult(
           `Synced: ${result.updated} updated, ${result.ghosted} ghosted`,
@@ -83,7 +108,7 @@ export function ArenaLeaderboard({
       setIsSyncing(false);
       setTimeout(() => setSyncResult(null), 4000);
     }
-  }, [fetchData]);
+  }, [fetchData, walletAddress, signMessage]);
 
   return (
     <section className="mt-14 md:mt-20">
@@ -148,20 +173,22 @@ export function ArenaLeaderboard({
               </motion.button>
             )}
 
-            {/* Admin Sync (hidden/subtle) */}
-            <button
-              type="button"
-              onClick={handleManualSync}
-              disabled={isSyncing}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-all disabled:opacity-50"
-              title="Sync Arena Data (Admin)"
-            >
-              {isSyncing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-            </button>
+            {/* Admin Sync — only rendered when a wallet is connected */}
+            {walletAddress && (
+              <button
+                type="button"
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-all disabled:opacity-50"
+                title="Sync Arena Data (Admin)"
+              >
+                {isSyncing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
           </div>
         </div>
 
@@ -241,11 +268,34 @@ export function ArenaLeaderboard({
                   </div>
                 ) : (
                   projects.map((project, i) => (
-                    <ProjectCard
-                      key={project.id}
-                      project={project}
-                      index={i}
-                    />
+                    <div key={project.id} className="group relative">
+                      <ProjectCard project={project} index={i} />
+                      {/* Squad member count + action button */}
+                      <div className="flex items-center justify-between mt-1.5 px-1">
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                          <Users className="h-3 w-3" />
+                          <span>
+                            {project.memberCount > 0
+                              ? `${project.memberCount} member${project.memberCount > 1 ? "s" : ""}`
+                              : "No members yet"}
+                          </span>
+                        </div>
+                        {walletAddress && isOptedIn && project.status !== "rugged" && (
+                          <button
+                            onClick={() =>
+                              setSquadModal({
+                                projectId: project.id,
+                                projectName: project.name,
+                                founderWallet: project.claimed_by_full ?? project.claimed_by,
+                              })
+                            }
+                            className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-700/50 bg-slate-900/40 text-slate-500 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all"
+                          >
+                            {project.claimed_by_full === walletAddress ? "Manage Squad" : "View Squad"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))
                 )}
               </motion.div>
@@ -263,6 +313,18 @@ export function ArenaLeaderboard({
           onSuccess={() => {
             fetchData();
           }}
+        />
+      )}
+
+      {/* Squad Member Modal */}
+      {walletAddress && squadModal && (
+        <SquadMemberModal
+          projectId={squadModal.projectId}
+          projectName={squadModal.projectName}
+          founderWallet={squadModal.founderWallet}
+          walletAddress={walletAddress}
+          isOpen={!!squadModal}
+          onClose={() => setSquadModal(null)}
         />
       )}
     </section>

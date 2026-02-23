@@ -11,8 +11,8 @@ import {
 } from "recharts";
 import { Fish, Dice5, Waves, Bot, History, Sparkles, Lock, X, Users, Wallet, Layers, Activity, AlertTriangle, Scan, Calendar, SlidersHorizontal, Code, Rocket, DollarSign, BadgeCheck, SearchX, ShieldCheck, Zap } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { analyzeWallet, getNetworkMatches, getUserAction, searchNetworkAction } from "@/app/actions/analyzeWallet";
-import type { MatchProfile, NetworkAgent, SearchFilters, UserIntent, WalletAnalysis } from "@/types";
+import { analyzeWallet, getNetworkMatches, getUserAction, searchNetworkAction, endorseUserAction } from "@/app/actions/analyzeWallet";
+import type { MatchProfile, NetworkAgent, SearchFilters, UserIntent, UserProfile, WalletAnalysis } from "@/types";
 import { MatchCard } from "@/components/match-card";
 import { JoinNetworkModal } from "@/components/JoinNetworkModal";
 import { ArenaLeaderboard } from "@/components/ArenaLeaderboard";
@@ -25,6 +25,91 @@ function formatAddress(address: string) {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }
 
+// ──────────────────────────────────────────────────────────────
+// Skeleton loaders — pure Tailwind, no extra deps
+// ──────────────────────────────────────────────────────────────
+
+function AnalysisSkeleton() {
+  return (
+    <div className="mx-auto max-w-3xl rounded-3xl border border-slate-800 bg-slate-950/80 p-6 md:p-8 animate-pulse">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-slate-800" />
+          <div className="space-y-2">
+            <div className="h-2.5 w-36 rounded bg-slate-800" />
+            <div className="h-4 w-52 rounded bg-slate-800" />
+          </div>
+        </div>
+        <div className="h-5 w-16 rounded-full bg-slate-800" />
+      </div>
+      <div className="mt-6 grid gap-6 md:grid-cols-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-5">
+          <div className="flex flex-col items-center gap-5">
+            <div className="h-36 w-36 rounded-full bg-slate-800" />
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="space-y-1.5">
+                  <div className="h-2 w-16 rounded bg-slate-800" />
+                  <div className="h-4 w-12 rounded bg-slate-800" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+            <div className="grid grid-cols-2 gap-3">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="rounded-xl border border-slate-800 px-3 py-2 space-y-1.5">
+                  <div className="h-2 w-20 rounded bg-slate-800" />
+                  <div className="h-4 w-14 rounded bg-slate-800" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 h-36 flex items-end pb-4">
+            <div className="h-1.5 w-full rounded-full bg-slate-800" />
+          </div>
+        </div>
+      </div>
+      <div className="mt-5 h-12 rounded-xl bg-slate-800" />
+    </div>
+  );
+}
+
+function MatchCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-5 animate-pulse">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="h-12 w-12 rounded-full bg-slate-800 flex-shrink-0" />
+        <div className="flex-1 space-y-2 pt-1">
+          <div className="h-4 w-28 rounded bg-slate-800" />
+          <div className="h-3 w-16 rounded-full bg-slate-800" />
+        </div>
+        <div className="h-7 w-12 rounded-lg bg-slate-800" />
+      </div>
+      <div className="mb-4 space-y-1.5">
+        <div className="flex justify-between items-center">
+          <div className="h-2 w-20 rounded bg-slate-800" />
+          <div className="h-4 w-10 rounded bg-slate-800" />
+        </div>
+        <div className="h-1.5 w-full rounded-full bg-slate-800" />
+      </div>
+      <div className="flex gap-1.5 mb-4">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-5 w-16 rounded bg-slate-800" />
+        ))}
+      </div>
+      <div className="space-y-1.5 mb-4">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-6 w-full rounded-md bg-slate-800" />
+        ))}
+      </div>
+      <div className="h-10 w-full rounded-lg bg-slate-800" />
+    </div>
+  );
+}
+
 function formatWalletAge(days: number | undefined): string {
   if (days == null) return "Unknown";
   if (days < 1) return "< 1 day";
@@ -34,7 +119,7 @@ function formatWalletAge(days: number | undefined): string {
 }
 
 export default function Home() {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signMessage } = useWallet();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState<string>(""); // Cool loading feedback
@@ -52,6 +137,8 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState(false);
   // Persistent User Sessions - Auto-sync on wallet connect
   const [isSyncing, setIsSyncing] = useState(false);
+  // Cached user profile for edit modal pre-fill
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   // Network Dopamine Layer - Success toast
   const [toast, setToast] = useState<string | null>(null);
 
@@ -61,6 +148,31 @@ export default function Home() {
     const timer = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // ── Endorsement: Sign + call endorseUserAction ──
+  const handleEndorse = useCallback(
+    async (targetAddress: string): Promise<{ success: boolean; message: string; alreadyEndorsed?: boolean }> => {
+      if (!publicKey || !signMessage) {
+        return { success: false, message: "Wallet not connected." };
+      }
+      const fromWallet = publicKey.toBase58();
+      try {
+        const message = `Pump Match Endorse\nTarget: ${targetAddress}\nFrom: ${fromWallet}\nTimestamp: ${Date.now()}`;
+        const messageBytes = new TextEncoder().encode(message);
+        const signatureBytes = await signMessage(messageBytes);
+        const signature = Buffer.from(signatureBytes).toString("base64");
+        const result = await endorseUserAction(fromWallet, targetAddress, { message, signature });
+        if (result.success && !result.alreadyEndorsed) {
+          setToast(`Endorsed! ${result.message}`);
+        }
+        return result;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Endorsement failed.";
+        return { success: false, message: msg };
+      }
+    },
+    [publicKey, signMessage],
+  );
 
   // ──────────────────────────────────────────────────────────────
   // Persistent User Sessions: Auto-fetch user profile on wallet connect
@@ -72,6 +184,7 @@ export default function Home() {
       setMatches([]);
       setQuery("");
       setIsSyncing(false);
+      setUserProfile(null);
       return;
     }
 
@@ -89,7 +202,8 @@ export default function Home() {
       setIsSyncing(true);
       try {
         const userProfile = await getUserAction(walletAddress);
-        
+        if (userProfile) setUserProfile(userProfile);
+
         if (userProfile) {
           // User exists: Automatically show their dashboard (skip landing)
           setQuery(walletAddress);
@@ -172,22 +286,10 @@ export default function Home() {
 
     setError(null);
     setLoading(true);
-    setLoadingPhase("Connecting to Solana...");
+    setLoadingPhase("Analyzing...");
 
     try {
-      // Loading phase feedback
-      const phaseTimer = setTimeout(() => setLoadingPhase("Scanning On-Chain History..."), 1200);
-      const phaseTimer2 = setTimeout(() => setLoadingPhase("Analyzing Asset Portfolio..."), 3000);
-      const phaseTimer3 = setTimeout(() => setLoadingPhase("Detecting First Activity..."), 5000);
-      const phaseTimer4 = setTimeout(() => setLoadingPhase("Calculating Trust Score..."), 7000);
-
       const response = await analyzeWallet(address, userIntent || undefined);
-
-      // Clear phase timers
-      clearTimeout(phaseTimer);
-      clearTimeout(phaseTimer2);
-      clearTimeout(phaseTimer3);
-      clearTimeout(phaseTimer4);
 
       const walletAnalysis = response.walletAnalysis;
       
@@ -458,6 +560,13 @@ export default function Home() {
           </section>
         )}
 
+        {/* ANALYSIS SKELETON — shows while loading (before analysis resolves) */}
+        {loading && !analysis && !searchResults && (
+          <section className="mt-12 md:mt-16">
+            <AnalysisSkeleton />
+          </section>
+        )}
+
         {/* ANALYSIS */}
         {analysis && !searchResults && (
           <section className="mt-12 md:mt-16">
@@ -473,7 +582,7 @@ export default function Home() {
                   </div>
                   <div className="text-left">
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                      TRUST ANALYSIS
+                      ON-CHAIN ACTIVITY SCORE
                     </p>
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-slate-300">
@@ -548,7 +657,7 @@ export default function Home() {
                         </div>
                       </div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-2 text-center">
-                        TRUST SCORE
+                        ACTIVITY SCORE
                       </p>
                       {analysis.isRegistered && (
                         <p className="text-[10px] text-emerald-400 font-semibold mt-1 text-center animate-pulse">
@@ -653,12 +762,6 @@ export default function Home() {
                               <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500/70 to-yellow-500/80 px-3 py-1 text-[11px] text-slate-950 shadow-md shadow-amber-500/40">
                                 <Sparkles className="h-3.5 w-3.5" />
                                 <span className="font-semibold">Community Trusted</span>
-                              </div>
-                            )}
-                            {analysis.badges.includes("governor") && (
-                              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500/70 to-yellow-500/80 px-3 py-1 text-[11px] text-slate-950 shadow-md shadow-amber-500/40">
-                                <Sparkles className="h-3.5 w-3.5" />
-                                <span className="font-semibold">Governor</span>
                               </div>
                             )}
                           </div>
@@ -843,16 +946,16 @@ export default function Home() {
                     </h3>
                   </div>
                   <p className="text-sm md:text-base text-slate-300 mb-4 leading-relaxed">
-                    Trust Score too low (&lt;50). Your current score is{" "}
+                    On-chain activity score too low (&lt;50). Your current score is{" "}
                     <span className="text-red-400 font-semibold">{analysis.trustScore}/100</span>.
-                    Increase system activity or earn community trust.
+                    Increase on-chain activity to unlock matchmaking.
                   </p>
                   <div className="mt-6 p-4 rounded-lg border border-slate-700/50 bg-slate-800/30">
                     <p className="text-xs text-slate-400 mb-2">Tips to improve your score:</p>
                     <ul className="text-xs text-slate-500 space-y-1 text-left max-w-md mx-auto">
                       <li>- Increase your SOL balance (System Score: {analysis.systemScore})</li>
-                      <li>- Make more transactions</li>
-                      <li>- Earn community trust (Social Score: {analysis.socialScore.toFixed(1)})</li>
+                      <li>- Make more on-chain transactions</li>
+                      <li>- Earn community endorsements (Social Score: {analysis.socialScore.toFixed(1)})</li>
                       <li>- Build a consistent on-chain history</li>
                     </ul>
                   </div>
@@ -883,6 +986,13 @@ export default function Home() {
                     By joining, you agree to be discoverable by other network members.
                   </p>
                 </div>
+              ) : loading && loadingPhase.includes("Fetching") ? (
+                /* SKELETON: Network matches loading */
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {[...Array(3)].map((_, i) => (
+                    <MatchCardSkeleton key={i} />
+                  ))}
+                </div>
               ) : matches.length > 0 ? (
                 /* STATE 2: Member - Show network matches */
                 <>
@@ -895,19 +1005,46 @@ export default function Home() {
                         key={profile.id}
                         profile={profile}
                         userIntent={userIntent}
+                        isOptedIn={analysis?.isRegistered}
                         onConnect={() => {
-                          alert("Invitation sent!");
+                          setToast(`Connection request sent to ${profile.username}!`);
                         }}
+                        onEndorse={
+                          profile.address
+                            ? () => handleEndorse(profile.address!)
+                            : undefined
+                        }
                       />
                     ))}
                   </div>
                 </>
               ) : (
                 /* STATE 2: Member but no matches found */
-                <div className="mx-auto max-w-2xl rounded-2xl border border-slate-700/50 bg-slate-900/50 p-8 md:p-12 text-center">
-                  <p className="text-slate-400">
-                    No network members found yet. Be the first to join!
+                <div className="mx-auto max-w-2xl rounded-2xl border border-slate-700/40 bg-slate-900/50 p-10 text-center">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full border border-slate-700/50 bg-slate-800/30 mb-5">
+                    <Users className="h-7 w-7 text-slate-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-200 mb-2">No matches yet</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed mb-6">
+                    The network is still growing. Try adjusting your intent or browsing active agents in the Arena below.
                   </p>
+                  <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setIsJoinModalOpen(true)}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                    >
+                      Update Intent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterOpen(true)}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/50 text-sm font-medium text-slate-300 hover:text-slate-100 hover:border-slate-600 transition-colors"
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Browse Network
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -925,61 +1062,91 @@ export default function Home() {
         {/* v2: Intent Layer - Onboarding Modal */}
         {showIntentModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 md:p-8 max-w-md w-full shadow-xl">
-              <div className="flex items-center justify-between mb-6">
+            <div className="bg-slate-900 rounded-2xl border border-slate-700/60 p-6 md:p-8 max-w-md w-full shadow-2xl shadow-black/40">
+              <div className="flex items-center justify-between mb-2">
                 <h2 className="text-xl font-semibold text-slate-100">What are you looking for?</h2>
                 <button
                   onClick={() => setShowIntentModal(false)}
-                  className="text-slate-400 hover:text-slate-200 transition-colors"
+                  className="rounded-full p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4.5 w-4.5" />
                 </button>
               </div>
-              <p className="text-sm text-slate-400 mb-6">
-                Help us find better matches by selecting your intent:
+              <p className="text-sm text-slate-400 mb-5">
+                Select your intent to unlock better squad matches.
               </p>
               <div className="space-y-2">
-                {(["BUILD_SQUAD", "FIND_FUNDING", "HIRE_TALENT", "JOIN_PROJECT", "NETWORK"] as UserIntent[]).map((intent) => (
+                {(
+                  [
+                    { value: "BUILD_SQUAD", emoji: "🛠️", label: "Build a Squad", description: "Find devs, artists, and community builders" },
+                    { value: "FIND_FUNDING", emoji: "💰", label: "Find Funding", description: "Connect with whales and early investors" },
+                    { value: "HIRE_TALENT", emoji: "🎯", label: "Hire Talent", description: "Scout experienced builders for your project" },
+                    { value: "JOIN_PROJECT", emoji: "🚀", label: "Join a Project", description: "Apply to teams that match your skills" },
+                    { value: "NETWORK", emoji: "🤝", label: "Just Network", description: "Explore the ecosystem and meet others" },
+                  ] as { value: UserIntent; emoji: string; label: string; description: string }[]
+                ).map(({ value, emoji, label, description }) => (
                   <button
-                    key={intent}
+                    key={value}
                     onClick={async () => {
-                      setUserIntent(intent);
+                      setUserIntent(value);
                       setShowIntentModal(false);
-                      // Re-run analysis after intent selection
                       if (query.trim()) {
                         setLoading(true);
+                        setLoadingPhase("Recalculating matches...");
                         try {
-                          const response = await analyzeWallet(query.trim(), intent);
+                          const response = await analyzeWallet(query.trim(), value);
                           setAnalysis(response.walletAnalysis);
-                          setMatches(response.matches);
+                          if (response.walletAnalysis.isRegistered) {
+                            setLoadingPhase("Fetching Network Matches...");
+                            try {
+                              const networkMatches = await getNetworkMatches(
+                                response.walletAnalysis.address,
+                                response.walletAnalysis,
+                              );
+                              setMatches(networkMatches);
+                            } catch {
+                              setMatches(response.matches);
+                            }
+                          } else {
+                            setMatches(response.matches);
+                          }
                         } catch (err) {
                           // eslint-disable-next-line no-console
                           console.error(err);
                           setError("An error occurred during analysis.");
                         } finally {
                           setLoading(false);
+                          setLoadingPhase("");
                         }
                       }
                     }}
-                    className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${
-                      userIntent === intent
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
-                        : "border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600"
+                    className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-150 ${
+                      userIntent === value
+                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300 shadow-sm shadow-emerald-500/10"
+                        : "border-slate-700/60 bg-slate-800/30 text-slate-300 hover:border-slate-600 hover:bg-slate-800/60"
                     }`}
                   >
-                    <div className="font-medium">{intent.replace(/_/g, " ")}</div>
+                    <span className="text-xl leading-none flex-shrink-0">{emoji}</span>
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm leading-tight">{label}</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">{description}</div>
+                    </div>
+                    {userIntent === value && (
+                      <div className="ml-auto flex-shrink-0 h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                        <div className="h-2 w-2 rounded-full bg-emerald-400" />
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
               <button
                 onClick={() => {
                   setShowIntentModal(false);
-                  // Run analysis on skip (without intent)
                   if (query.trim() && !userIntent) {
                     handleAnalyze();
                   }
                 }}
-                className="mt-4 w-full px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+                className="mt-4 w-full px-4 py-2 text-sm text-slate-500 hover:text-slate-300 transition-colors"
               >
                 Skip for now
               </button>
@@ -994,6 +1161,9 @@ export default function Home() {
             isOpen={isJoinModalOpen}
             onClose={() => setIsJoinModalOpen(false)}
             currentIntent={analysis.intent?.replace(/_/g, " ")}
+            currentUsername={userProfile?.username}
+            currentTags={userProfile?.tags}
+            currentSocialLinks={userProfile?.socialLinks}
             isEditing={analysis.isRegistered}
             onSuccess={(intent) => {
               // Update local state immediately (no full page reload)
@@ -1114,7 +1284,7 @@ function AgentMicroCard({ agent, onClick }: { agent: NetworkAgent; onClick: () =
           {agent.trustScore}
         </span>
         <span className="text-[9px] uppercase tracking-widest text-slate-600 mt-0.5">
-          Trust
+          Score
         </span>
       </div>
 

@@ -1,4 +1,4 @@
-export type BadgeId = "whale" | "dev" | "og_wallet" | "community_trusted" | "governor";
+export type BadgeId = "whale" | "dev" | "og_wallet" | "community_trusted";
 
 // Tek yerde tanımlanan Role tipi — MatchProfile, UserProfile ve NetworkAgent tarafından paylaşılır
 export type Role = "Dev" | "Artist" | "Marketing" | "Whale" | "Community";
@@ -73,7 +73,6 @@ export type MatchReasonCode =
   | "BADGE_BONUS_SOCIAL"
   | "BADGE_BONUS_WHALE"
   | "BADGE_BONUS_DEV"
-  | "BADGE_BONUS_GOVERNOR"
   | "BADGE_BONUS_VERIFIED"
   | "SOCIAL_PROOF_COMMUNITY"
   | "SOCIAL_PROOF_VERIFIED"
@@ -90,6 +89,11 @@ export type MatchReason = {
   code: MatchReasonCode;
   impact: MatchReasonImpact;
   status: MatchReasonStatus;
+};
+
+export type SocialLinks = {
+  twitter?: string;
+  telegram?: string;
 };
 
 export type WalletAnalysis = {
@@ -134,6 +138,12 @@ export type MatchProfile = {
   identityState?: IdentityState;
   // Mentor Logic: Structured match reasons (POSITIVE + MISSING signals)
   matchReasons?: MatchReason[];
+  // Social contact handles (from DB, shown on Connect)
+  socialLinks?: SocialLinks;
+  // Endorsement system: community trust signal
+  address?: string;          // Wallet address (for endorsement action)
+  endorsementCount?: number; // Real-time count from endorsements table
+  isEndorsedByMe?: boolean;  // Whether the current user has already endorsed this profile
 };
 
 // Opt-In Network Architecture - User Profile (Registered Users)
@@ -162,6 +172,8 @@ export type UserProfile = {
   matchFilters?: {
     minTrustScore?: number; // Hard reject threshold for incoming matches
   };
+  // Social contact handles (optional, user-provided)
+  socialLinks?: SocialLinks;
 };
 
 // God Mode Discovery: Search filter parameters
@@ -214,6 +226,18 @@ export type SquadProject = {
   last_valid_mc: number | null;
   last_mc_update: string | null; // ISO timestamp
   created_at: string;
+};
+
+export type SquadMemberStatus = "active" | "pending";
+
+export type SquadMember = {
+  id: string;
+  projectId: string;
+  walletAddress: string;   // masked in UI (first4...last4)
+  displayAddress: string;  // pre-masked version for display
+  role?: Role;
+  status: SquadMemberStatus;
+  joinedAt: string;        // ISO timestamp
 };
 
 export type DexScreenerPair = {

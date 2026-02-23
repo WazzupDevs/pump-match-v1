@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
 
 // ──────────────────────────────────────────────────────────────
@@ -29,7 +30,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  // SECURITY: Use constant-time comparison to prevent timing attacks.
+  // String === comparison leaks secret length/value via CPU timing differences.
+  const expected = `Bearer ${cronSecret}`;
+  const provided = authHeader ?? "";
+  const isValid =
+    provided.length === expected.length &&
+    timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+
+  if (!isValid) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 },

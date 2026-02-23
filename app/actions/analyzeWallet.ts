@@ -8,17 +8,24 @@ import {
   type DasAsset,
 } from "@/lib/helius";
 import { getMatches } from "@/lib/match-engine";
-// GÜNCELLEME: Supabase upsert fonksiyonunu ekledik
-import { getUserProfile, isUserRegistered, upsertUser, findMatches, updateMatchSnapshot } from "@/lib/db";
+import {
+  getUserProfile, isUserRegistered, upsertUser, findMatches, updateMatchSnapshot,
+  getEndorsementCount, addEndorsement, getEndorsementCounts, getMyEndorsements,
+} from "@/lib/db";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
+// SECURITY: Crypto helpers extracted to lib/signature.ts to avoid duplication
+import { verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
+import { headers } from "next/headers";
+
 import type {
   AnalyzeWalletResult,
   AnalyzeWalletResponse,
   Badge,
   BadgeCategory,
   BadgeId,
-  IdentityState,
   MatchProfile,
   ScoreBreakdown,
+  SocialLinks,
   UserIntent,
   UserProfile,
   WalletAnalysis,
@@ -35,6 +42,8 @@ type CachedAnalysis = {
 };
 
 const ANALYSIS_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+// SECURITY (VULN-12): Cap cache size to prevent unbounded memory growth / soft-DoS
+const MAX_ANALYSIS_CACHE_SIZE = 1000;
 
 // Persist across hot-reloads in dev
 const globalForCache = globalThis as unknown as {
@@ -157,7 +166,6 @@ const BADGE_DEFINITIONS: Record<BadgeId, { label: string; category: BadgeCategor
   dev: { label: "Dev", category: "SYSTEM", baseWeight: 5, icon: "Code" },
   og_wallet: { label: "OG Wallet", category: "SYSTEM", baseWeight: 4, icon: "Clock" },
   community_trusted: { label: "Community Trusted", category: "SOCIAL", baseWeight: 7, icon: "ShieldCheck" },
-  governor: { label: "Governor", category: "SOCIAL", baseWeight: 12, icon: "Crown" },
 };
 
 /**
@@ -251,13 +259,29 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     throw new Error("Invalid Solana address. Please enter a valid base58 wallet address.");
   }
 
-  // Production Grade: Check memory cache (15-min TTL)
-  const cacheKey = `${trimmed}:${userIntent ?? "none"}`;
+  // SECURITY (VULN-04): Cache key is address-only — NOT intent-dependent.
+  // Intent-based cache keys allowed 5x bypass (one per intent value), exhausting
+  // the Helius API key. Intent is applied to the cached response without re-fetching.
+  const cacheKey = trimmed;
   const cached = analysisCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < ANALYSIS_CACHE_TTL_MS) {
     // eslint-disable-next-line no-console
-    console.log(`[analyzeWallet] Cache HIT for ${trimmed} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+    console.log(`[analyzeWallet] Cache HIT for ${trimmed.slice(0, 8)}... (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+
+    // If intent changed, update it in the cached response without re-fetching
+    if (userIntent && cached.response.walletAnalysis.intent !== userIntent) {
+      const updatedAnalysis = { ...cached.response.walletAnalysis, intent: userIntent };
+      const updatedMatches = getMatches(updatedAnalysis);
+      return { ...cached.response, walletAnalysis: updatedAnalysis, matches: updatedMatches };
+    }
     return cached.response;
+  }
+
+  // SECURITY (VULN-11): Rate limit by wallet address — prevents Helius API exhaustion
+  const rateCheck = await checkRateLimit(trimmed, RATE_LIMITS.ANALYZE_WALLET.maxRequests, RATE_LIMITS.ANALYZE_WALLET.windowMs);
+  if (!rateCheck.allowed) {
+    const retryInMin = Math.ceil(rateCheck.retryAfterMs / 60000);
+    throw new Error(`Rate limit exceeded. Please wait ${retryInMin} minute(s) before analyzing again.`);
   }
 
   try {
@@ -334,36 +358,46 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
 
     // Badge assignment and score calculation (server-side only)
     const badges = assignBadges(solBalance, transactionCount, tokenDiversity);
-    const { systemScore, socialScore } = calculateBadgeScores(badges);
 
     const trustScore = scoreBreakdown.total;
     const score = trustScore;
-    const scoreLabel = trustScore >= 80 ? "High Trust" : trustScore >= 50 ? "Medium Trust" : "Low Trust";
+    const scoreLabel = trustScore >= 80 ? "Strong Activity" : trustScore >= 50 ? "Moderate Activity" : "Low Activity";
 
     // Opt-In Network Architecture - Check if user is registered (In-Memory Check removed, now relies on DB sync)
     const isRegistered = await isUserRegistered(trimmed);
 
-    // ──────────────────────────────────────────────────────────────
-    // GÜNCELLEME: SUPABASE KAYIT (Kalıcı Hafıza)
-    // Analiz yapılır yapılmaz veriyi Supabase'e "Upsert" ediyoruz.
-    // Böylece kullanıcı sayfayı yenilese bile Trust Score'u veritabanında saklı kalıyor.
-    // ──────────────────────────────────────────────────────────────
-    try {
-      // Basit bir seviye belirleme mantığı (Join öncesi placeholder)
-      const calculatedLevel = badges.includes("whale") ? "Whale" :
-                              badges.includes("dev") ? "Dev" :
-                              badges.includes("og_wallet") ? "OG" : "Rookie";
+    // Community badge: For registered users use real endorsement count instead of mock heuristic
+    if (isRegistered) {
+      const endorsementCount = await getEndorsementCount(trimmed);
+      const badgeIdx = badges.indexOf('community_trusted');
+      if (endorsementCount >= 3 && badgeIdx === -1) {
+        badges.push('community_trusted');
+      } else if (endorsementCount < 3 && badgeIdx !== -1) {
+        badges.splice(badgeIdx, 1);
+      }
+    }
 
-      await upsertUser(trimmed, {
-        trust_score: trustScore,
-        level: calculatedLevel,
-        // match_count gibi diğer alanları değiştirmiyoruz, mevcutsa kalır
-      });
-      // eslint-disable-next-line no-console
-      console.log(`[analyzeWallet] Synced data to Supabase for ${trimmed.slice(0, 6)}...`);
-    } catch (dbError) {
-      // DB hatası analizi durdurmamalı, sadece logluyoruz
-      console.error("[analyzeWallet] Supabase Sync Failed:", dbError);
+    const { systemScore, socialScore } = calculateBadgeScores(badges);
+
+    // ──────────────────────────────────────────────────────────────
+    // SECURITY (VULN-03): Only update trust score for ALREADY-REGISTERED users.
+    // Previously, every analyzeWallet call upserted ANY wallet into the DB —
+    // allowing an attacker to spam thousands of random wallets into Supabase.
+    // Now: guest wallets are analyzed in memory only, DB is not touched.
+    // ──────────────────────────────────────────────────────────────
+    if (isRegistered) {
+      try {
+        const calculatedLevel = badges.includes("whale") ? "Whale" :
+                                badges.includes("dev") ? "Dev" :
+                                badges.includes("og_wallet") ? "OG" : "Rookie";
+
+        await upsertUser(trimmed, {
+          trust_score: trustScore,
+          level: calculatedLevel,
+        });
+      } catch (dbError) {
+        console.error("[analyzeWallet] Supabase Sync Failed:", dbError);
+      }
     }
     // ──────────────────────────────────────────────────────────────
 
@@ -397,7 +431,13 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       matches,
     };
 
-    // Production Grade: Store in cache
+    // Production Grade: Store in cache (SECURITY VULN-12: evict oldest 10% when cap reached)
+    if (analysisCache.size >= MAX_ANALYSIS_CACHE_SIZE) {
+      const evictCount = Math.ceil(MAX_ANALYSIS_CACHE_SIZE * 0.1);
+      for (const key of [...analysisCache.keys()].slice(0, evictCount)) {
+        analysisCache.delete(key);
+      }
+    }
     analysisCache.set(cacheKey, { response, timestamp: Date.now() });
     // eslint-disable-next-line no-console
     console.log(`[analyzeWallet] Cache MISS for ${trimmed}. Stored. Cache size: ${analysisCache.size}`);
@@ -420,10 +460,48 @@ export async function joinNetwork(
   address: string,
   username: string,
   walletAnalysis: WalletAnalysis,
+  signedMessage?: { message: string; signature: string },
+  socialLinks?: SocialLinks,
 ): Promise<{ success: boolean; message: string }> {
   "use server";
 
   try {
+    // SECURITY (VULN-11): Rate limit joinNetwork by wallet address
+    const rateCheck = await checkRateLimit(address.trim(), RATE_LIMITS.JOIN_NETWORK.maxRequests, RATE_LIMITS.JOIN_NETWORK.windowMs);
+    if (!rateCheck.allowed) {
+      return { success: false, message: "Too many join attempts. Please wait before trying again." };
+    }
+
+    // SECURITY (VULN-09): Sanitize username — strip HTML, enforce length, allow only safe chars
+    const sanitizedUsername = username
+      .trim()
+      // SECURITY (VULN-11): Strip control chars (null byte \x00, CR, LF, DEL, etc.)
+      .replace(/[\x00-\x1f\x7f]/g, "")
+      .replace(/[<>"'&]/g, "") // Strip XSS-prone characters
+      .slice(0, 32);           // Max 32 chars
+
+    if (sanitizedUsername.length < 1) {
+      return { success: false, message: "Invalid username." };
+    }
+
+    // SECURITY (VULN-01): Wallet signature is MANDATORY — proves key ownership.
+    // Prevents impersonation: anyone could join as any wallet without this check.
+    // SECURITY (VULN-07): Timestamp validated to block replay attacks (5-min window).
+    if (!signedMessage) {
+      return { success: false, message: "Wallet signature is required. Please reconnect your wallet and try again." };
+    }
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please sign again." };
+    }
+    const isValidSig = await verifyWalletSignature(
+      address.trim(),
+      signedMessage.message,
+      signedMessage.signature,
+    );
+    if (!isValidSig) {
+      return { success: false, message: "Signature verification failed. Please reconnect your wallet." };
+    }
+
     if (!walletAnalysis.intent) {
       return {
         success: false,
@@ -471,7 +549,7 @@ export async function joinNetwork(
     const userProfile: UserProfile = {
       id: existingUser?.id ?? `user_${address.slice(0, 8)}`,
       address: address.trim(),
-      username,
+      username: sanitizedUsername,
       role: walletAnalysis.badges.includes("whale")
         ? "Whale"
         : walletAnalysis.tokenDiversity > 10
@@ -518,6 +596,9 @@ export async function joinNetwork(
         identityState: userProfile.identityState,
         is_opted_in: true,
         intent: userProfile.intent,
+        tags: userProfile.tags,         // Preserve user tags (community interests)
+        joined_at: userProfile.joinedAt, // Immutable OG date — only written once due to upsert undefined removal
+        social_links: socialLinks,       // Optional Twitter/Telegram handles
     });
 
     // Not: success UserData | null döner, bu yüzden truthy kontrolü yeterli
@@ -564,6 +645,17 @@ export async function getNetworkMatches(
       return []; // Not registered
     }
 
+    // SECURITY (VULN-05): Override client-provided analysis with DB-authoritative values.
+    // Prevents trust score / badge spoofing to manipulate match results.
+    // solBalance / tokenDiversity / nftCount are NOT stored in DB (on-chain only),
+    // so we override the two most impactful fields: trustScore and badges.
+    const serverVerifiedAnalysis: WalletAnalysis = {
+      ...userWalletAnalysis,
+      trustScore: user.trustScore,
+      score: user.trustScore,
+      badges: user.activeBadges.map((b) => b.id as BadgeId),
+    };
+
     // Security & Stability - Snapshot Logic: Check if cache is still valid (5 minutes)
     const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
     const now = Date.now();
@@ -587,12 +679,19 @@ export async function getNetworkMatches(
       return []; // No matches found
     }
 
+    // Endorsement system: Batch-fetch counts + "endorsed by me" flags (2 queries total)
+    const matchAddresses = registeredUsers.map((u) => u.address);
+    const [endorsementCountMap, myEndorsedSet] = await Promise.all([
+      getEndorsementCounts(matchAddresses),
+      getMyEndorsements(userAddress, matchAddresses),
+    ]);
+
     // Convert UserProfile[] to MatchProfile[] using match engine
     // Phase 1: Pass matchFilters and lastActiveAt for reciprocity & time decay
     const matchProfiles: MatchProfile[] = registeredUsers
       .map((matchUser) => {
         const { confidence, reason, breakdown, matchReasons } = calculateMatchScore(
-          userWalletAnalysis,
+          serverVerifiedAnalysis,
           {
             id: matchUser.id,
             username: matchUser.username,
@@ -621,6 +720,7 @@ export async function getNetworkMatches(
 
         return {
           id: matchUser.id,
+          address: matchUser.address,
           username: matchUser.username,
           role: matchUser.role,
           trustScore: matchUser.trustScore,
@@ -633,6 +733,10 @@ export async function getNetworkMatches(
           intent: matchUser.intent,
           identityState: matchUser.identityState ?? "GHOST",
           matchReasons,
+          socialLinks: matchUser.socialLinks,
+          // Endorsement system
+          endorsementCount: endorsementCountMap.get(matchUser.address) ?? 0,
+          isEndorsedByMe: myEndorsedSet.has(matchUser.address),
           // Internal sorting helpers (will be removed before return)
           _systemScore: systemScore,
           _isVerified: matchUser.identityState === "VERIFIED",
@@ -640,35 +744,23 @@ export async function getNetworkMatches(
       })
       .filter((profile): profile is MatchProfile & { _systemScore: number; _isVerified: boolean } => profile !== null);
 
-    // Identity Hierarchy & Sorting - CTO Tuning
-    // Sorting Bias Logic: Match Score > Verified Priority > System Score
-    // Phase 2: Score Jitter - microscopic randomness to prevent inference attacks
-    // Jitter is ephemeral (per-query only), does NOT alter stored scores
+    // Identity Hierarchy & Sorting: Match Score > Verified Priority > System Score
     matchProfiles.sort((a, b) => {
       const aProfile = a as MatchProfile & { _systemScore: number; _isVerified: boolean };
       const bProfile = b as MatchProfile & { _systemScore: number; _isVerified: boolean };
 
-      // Phase 2: Anti-inference jitter (max 0.5 points per side, net effect +-1.0)
-      // This shuffles the order of same-score entries across queries,
-      // making it impossible for bots to infer deterministic ranking patterns
-      const jitterA = Math.random() * 0.5;
-      const jitterB = Math.random() * 0.5;
-      const aScore = aProfile.matchConfidence + jitterA;
-      const bScore = bProfile.matchConfidence + jitterB;
-
-      // 1. PRIMARY: Match Score (highest first) - with jitter applied
-      if (Math.abs(aScore - bScore) > 2) {
-        return bScore - aScore;
+      // 1. PRIMARY: Match Score (highest first)
+      if (Math.abs(aProfile.matchConfidence - bProfile.matchConfidence) > 2) {
+        return bProfile.matchConfidence - aProfile.matchConfidence;
       }
 
-      // 2. TIE-BREAKER: Verified Priority (if scores are close, +/- 2 points)
-      // Verified users get priority when scores are similar
+      // 2. TIE-BREAKER: Verified priority when scores are close
       if (aProfile._isVerified !== bProfile._isVerified) {
-        return aProfile._isVerified ? -1 : 1; // Verified first
+        return aProfile._isVerified ? -1 : 1;
       }
 
-      // 3. FINAL TIE-BREAKER: System Score (on-chain score) + jitter
-      return (bProfile._systemScore + jitterB) - (aProfile._systemScore + jitterA);
+      // 3. FINAL TIE-BREAKER: System Score (on-chain)
+      return bProfile._systemScore - aProfile._systemScore;
     });
 
     // Remove internal sorting helpers before returning
@@ -698,108 +790,6 @@ export async function getNetworkMatches(
   }
 }
 
-/**
- * Identity Hierarchy & Sorting - Verify Payment
- * Ödeme başarılıysa identityState otomatik olarak "VERIFIED" olur.
- * KURAL: IdentityState tek yönlüdür: VERIFIED (Top) > REACHABLE > GHOST (Default)
- */
-export async function verifyPayment(
-  address: string,
-): Promise<{ success: boolean; message: string; identityState?: IdentityState }> {
-  "use server";
-
-  try {
-    const user = await getUserProfile(address.trim());
-    if (!user) {
-      return {
-        success: false,
-        message: "User not found. Please join the network first.",
-      };
-    }
-
-    // Identity Hierarchy Logic: VERIFIED is the highest state, cannot be downgraded
-    const newIdentityState: IdentityState = "VERIFIED";
-
-    const success = await upsertUser(address.trim(), {
-        identityState: newIdentityState,
-    });
-
-    if (success) {
-      return {
-        success: true,
-        message: "Payment verified! Your identity is now VERIFIED.",
-        identityState: newIdentityState,
-        // Not: Gerçek app'te db'ye identity status kolonu açmalıyız
-      };
-    } else {
-      return {
-        success: false,
-        message: "Failed to update identity state.",
-      };
-    }
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(`[verifyPayment] Exception for ${address}:`, error);
-    return {
-      success: false,
-      message: `Failed to verify payment: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
-/**
- * Identity Hierarchy & Sorting - Link Social
- * Eğer state "GHOST" ise "REACHABLE" yap. Ama zaten "VERIFIED" ise düşürme.
- * KURAL: IdentityState tek yönlüdür: VERIFIED (Top) > REACHABLE > GHOST (Default)
- */
-export async function linkSocial(
-  address: string,
-  socialPlatform: string,
-): Promise<{ success: boolean; message: string; identityState?: IdentityState }> {
-  "use server";
-
-  try {
-    const user = await getUserProfile(address.trim());
-    if (!user) {
-      return {
-        success: false,
-        message: "User not found. Please join the network first.",
-      };
-    }
-
-    // Identity Hierarchy Logic: one-way escalation, cannot downgrade
-    const currentState = user.identityState ?? "GHOST";
-    const newIdentityState: IdentityState =
-      currentState === "VERIFIED" || currentState === "REACHABLE"
-        ? currentState
-        : "REACHABLE"; // Upgrade from GHOST to REACHABLE
-
-    const success = await upsertUser(address.trim(), {
-        identityState: newIdentityState,
-    });
-
-    if (success) {
-      return {
-        success: true,
-        message: `Social account (${socialPlatform}) linked! Your identity is now ${newIdentityState}.`,
-        identityState: newIdentityState,
-      };
-    } else {
-      return {
-        success: false,
-        message: "Failed to link social account.",
-      };
-    }
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(`[linkSocial] Exception for ${address}:`, error);
-    return {
-      success: false,
-      message: `Failed to link social: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
 // ──────────────────────────────────────────────────────────────
 // God Mode Discovery: Search Network Action (READ-ONLY)
 // ──────────────────────────────────────────────────────────────
@@ -817,12 +807,183 @@ export async function searchNetworkAction(
   "use server";
 
   try {
+    // SECURITY (VULN-06): Rate limit by client IP — prevents full-network enumeration.
+    // RATE_LIMITS.SEARCH_NETWORK was defined but never applied before this fix.
+    const headersList = await headers();
+    const ip =
+      headersList.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      headersList.get("x-real-ip") ??
+      "unknown";
+    const rateCheck = await checkRateLimit(
+      `search:${ip}`,
+      RATE_LIMITS.SEARCH_NETWORK.maxRequests,
+      RATE_LIMITS.SEARCH_NETWORK.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return [];
+    }
+
     const { searchNetwork } = await import("@/lib/db");
     return searchNetwork(filters);
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(`[searchNetworkAction] Exception:`, error);
     return [];
+  }
+}
+
+/**
+ * Update profile fields without requiring a full WalletAnalysis re-fetch.
+ * Lighter than joinNetwork — only updates username, tags, intent, socialLinks.
+ * Requires signature to prevent unauthorized edits.
+ */
+export async function updateProfileAction(
+  address: string,
+  updates: {
+    username?: string;
+    tags?: string[];
+    socialLinks?: SocialLinks;
+  },
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string }> {
+  "use server";
+
+  try {
+    const trimmed = address.trim();
+
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please try again." };
+    }
+    const isValidSig = await verifyWalletSignature(trimmed, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) {
+      return { success: false, message: "Signature verification failed." };
+    }
+
+    // Must be opted-in
+    const existing = await getUserProfile(trimmed);
+    if (!existing?.isOptedIn) {
+      return { success: false, message: "You must be a network member to update your profile." };
+    }
+
+    const upsertData: Parameters<typeof upsertUser>[1] = {};
+
+    // Username: sanitize (same rules as joinNetwork)
+    if (updates.username !== undefined) {
+      const sanitized = updates.username
+        .trim()
+        .replace(/[\x00-\x1f\x7f]/g, "")
+        .replace(/[<>"'&]/g, "")
+        .slice(0, 32);
+      if (sanitized.length < 1) {
+        return { success: false, message: "Invalid username." };
+      }
+      upsertData.username = sanitized;
+    }
+
+    // Tags: max 10, each max 20 chars, strip XSS-prone chars
+    if (updates.tags !== undefined) {
+      upsertData.tags = updates.tags
+        .map((t) => t.trim().replace(/[<>"'&]/g, "").slice(0, 20))
+        .filter(Boolean)
+        .slice(0, 10);
+    }
+
+    // Social links
+    if (updates.socialLinks !== undefined) {
+      upsertData.social_links = updates.socialLinks;
+    }
+
+    if (Object.keys(upsertData).length === 0) {
+      return { success: false, message: "Nothing to update." };
+    }
+
+    const result = await upsertUser(trimmed, upsertData);
+    if (!result) {
+      return { success: false, message: "Failed to update profile." };
+    }
+
+    return { success: true, message: "Profile updated successfully." };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[updateProfileAction] Exception:`, error);
+    return { success: false, message: "Update failed. Please try again." };
+  }
+}
+
+/**
+ * Endorse a network member. Proves key ownership via Ed25519 signature.
+ * - Caller must be opted-in
+ * - Cannot endorse self
+ * - Rate limited: 5/day per wallet
+ * - Idempotent: duplicate returns alreadyEndorsed=true
+ * - After 3 endorsements the endorsed wallet earns community_trusted badge on next analyzeWallet
+ */
+export async function endorseUserAction(
+  fromWallet: string,
+  toWallet: string,
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string; alreadyEndorsed?: boolean }> {
+  "use server";
+
+  try {
+    const from = fromWallet.trim();
+    const to = toWallet.trim();
+
+    // Basic validation
+    if (!from || !to) return { success: false, message: "Invalid wallet address." };
+    if (from === to) return { success: false, message: "You cannot endorse yourself." };
+
+    // Signature verification (replay protection built into validateMessageTimestamp)
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please try again." };
+    }
+    const isValidSig = await verifyWalletSignature(from, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) {
+      return { success: false, message: "Signature verification failed." };
+    }
+
+    // Caller must be an opted-in network member
+    const fromProfile = await getUserProfile(from);
+    if (!fromProfile?.isOptedIn) {
+      return { success: false, message: "You must join the network before endorsing others." };
+    }
+
+    // Rate limit: 5 endorsements per day per wallet
+    const rateCheck = await checkRateLimit(from, RATE_LIMITS.ENDORSE.maxRequests, RATE_LIMITS.ENDORSE.windowMs);
+    if (!rateCheck.allowed) {
+      return { success: false, message: "Endorsement limit reached (5/day). Try again tomorrow." };
+    }
+
+    // Target must also be in the network
+    const toProfile = await getUserProfile(to);
+    if (!toProfile?.isOptedIn) {
+      return { success: false, message: "Target wallet is not a network member." };
+    }
+
+    // Write endorsement (idempotent via UNIQUE constraint)
+    const result = await addEndorsement(from, to);
+    if (!result.success) {
+      return { success: false, message: "Failed to record endorsement. Please try again." };
+    }
+    if (result.alreadyEndorsed) {
+      return { success: true, message: "Already endorsed.", alreadyEndorsed: true };
+    }
+
+    // Update endorsement count in target's social_proof (for UI consistency)
+    const newCount = await getEndorsementCount(to);
+    await upsertUser(to, {
+      socialProof: {
+        ...toProfile.socialProof,
+        endorsements: newCount,
+        communityTrusted: newCount >= 3,
+      },
+    });
+
+    return { success: true, message: `Successfully endorsed ${toProfile.username}!`, alreadyEndorsed: false };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[endorseUserAction] Exception:`, error);
+    return { success: false, message: "Endorsement failed. Please try again." };
   }
 }
 

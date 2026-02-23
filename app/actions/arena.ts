@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { getAsset } from "@/lib/helius";
-import { getUserProfile } from "@/lib/db";
+import { getUserProfile, addSquadMember, getSquadMembers, removeSquadMember, getSquadMemberCounts } from "@/lib/db";
+import type { SquadMember, Role } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
+import { verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
 
 // ──────────────────────────────────────────────────────────────
 // Arena Financial Snapshot Engine — Secure Claim Action
@@ -307,7 +310,8 @@ export type PowerSquadProject = {
   name: string;
   symbol: string;
   mint_address: string;
-  claimed_by: string;
+  claimed_by: string;          // masked address for display
+  claimed_by_full?: string;    // unmasked, only for founder check in SquadMemberModal
   status: string;
   claim_tier: string;
   is_renounced: boolean;
@@ -318,6 +322,7 @@ export type PowerSquadProject = {
   last_valid_mc: number | null;
   last_mc_update: string | null;
   created_at: string;
+  memberCount: number;         // active squad members
 };
 
 /**
@@ -338,15 +343,26 @@ export async function getEliteAgents(): Promise<EliteAgent[]> {
     return [];
   }
 
-  return data.map((row, index) => ({
-    rank: index + 1,
-    id: row.id as string,
-    address: row.wallet_address as string,
-    username: (row.username as string) || "Anon",
-    trustScore: row.trust_score as number,
-    isOptedIn: true,
-    identityState: (row.identity_state as string) || "GHOST",
-  }));
+  return data.map((row, index) => {
+    // SECURITY (VULN-10): Mask full wallet address in public leaderboard.
+    // Exposes only first 4 + last 4 chars — sufficient for identification,
+    // prevents phishing/dust-attack targeting via the leaderboard API.
+    const fullAddress = row.wallet_address as string;
+    const maskedAddress =
+      fullAddress.length > 10
+        ? `${fullAddress.slice(0, 4)}...${fullAddress.slice(-4)}`
+        : fullAddress;
+
+    return {
+      rank: index + 1,
+      id: row.id as string,
+      address: maskedAddress,
+      username: (row.username as string) || "Anon",
+      trustScore: row.trust_score as number,
+      isOptedIn: true,
+      identityState: (row.identity_state as string) || "GHOST",
+    };
+  });
 }
 
 /**
@@ -366,24 +382,40 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
     return [];
   }
 
-  return data.map((row, index) => ({
-    rank: index + 1,
-    id: row.id as string,
-    name: row.name as string,
-    symbol: (row.project_symbol as string) || (row.symbol as string) || "",
-    mint_address: row.mint_address as string,
-    claimed_by: row.claimed_by as string,
-    status: (row.status as string) || "active",
-    claim_tier: (row.claim_tier as string) || "community",
-    is_renounced: (row.is_renounced as boolean) ?? false,
-    market_cap: row.market_cap as number | null,
-    fdv: row.fdv as number | null,
-    liquidity_usd: row.liquidity_usd as number | null,
-    volume_24h: row.volume_24h as number | null,
-    last_valid_mc: row.last_valid_mc as number | null,
-    last_mc_update: row.last_mc_update as string | null,
-    created_at: row.created_at as string,
-  }));
+  // Batch-fetch member counts for all projects (1 extra query)
+  const projectIds = data.map((row) => row.id as string);
+  const memberCountMap = await getSquadMemberCounts(projectIds);
+
+  return data.map((row, index) => {
+    // SECURITY (VULN-08): Mask founder wallet address — mirrors getEliteAgents masking.
+    const founderAddr = row.claimed_by as string;
+    const maskedFounder =
+      founderAddr && founderAddr.length > 10
+        ? `${founderAddr.slice(0, 4)}...${founderAddr.slice(-4)}`
+        : founderAddr;
+
+    const projectId = row.id as string;
+    return {
+      rank: index + 1,
+      id: projectId,
+      name: row.name as string,
+      symbol: (row.project_symbol as string) || (row.symbol as string) || "",
+      mint_address: row.mint_address as string,
+      claimed_by: maskedFounder,
+      claimed_by_full: founderAddr,
+      status: (row.status as string) || "active",
+      claim_tier: (row.claim_tier as string) || "community",
+      is_renounced: (row.is_renounced as boolean) ?? false,
+      market_cap: row.market_cap as number | null,
+      fdv: row.fdv as number | null,
+      liquidity_usd: row.liquidity_usd as number | null,
+      volume_24h: row.volume_24h as number | null,
+      last_valid_mc: row.last_valid_mc as number | null,
+      last_mc_update: row.last_mc_update as string | null,
+      created_at: row.created_at as string,
+      memberCount: memberCountMap.get(projectId) ?? 0,
+    };
+  });
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -403,8 +435,65 @@ type SyncResult = {
  * Manual trigger for the Arena Market Cap sync.
  * Allows admins to force a refresh from the UI without waiting for cron.
  * Revalidates the leaderboard path after sync completes.
+ *
+ * SECURITY (VULN-02): Caller must provide their wallet address.
+ * Server validates it against ADMIN_WALLET env var before executing sync.
  */
-export async function triggerManualSync(): Promise<SyncResult> {
+export async function triggerManualSync(
+  callerWallet: string,
+  signedMessage: { message: string; signature: string },
+): Promise<SyncResult> {
+  // ── Auth Guard: Admin-only action ──
+  const adminWallet = process.env.ADMIN_WALLET;
+
+  if (!adminWallet) {
+    // eslint-disable-next-line no-console
+    console.error("[triggerManualSync] ADMIN_WALLET env var is not configured.");
+    return {
+      success: false,
+      processed: 0,
+      updated: 0,
+      ghosted: 0,
+      skipped: 0,
+      error: "Server misconfiguration: admin wallet not set.",
+    };
+  }
+
+  if (!callerWallet || callerWallet.trim().toLowerCase() !== adminWallet.trim().toLowerCase()) {
+    // eslint-disable-next-line no-console
+    console.warn(`[triggerManualSync] Unauthorized attempt from: ${callerWallet?.slice(0, 8) ?? "unknown"}`);
+    return {
+      success: false,
+      processed: 0,
+      updated: 0,
+      ghosted: 0,
+      skipped: 0,
+      error: "Unauthorized. Admin access required.",
+    };
+  }
+
+  // SECURITY (VULN-04): Knowing the admin address is not enough — ownership must be
+  // cryptographically proven. Rate-limit + signed message + timestamp check.
+  const syncRateCheck = await checkRateLimit(
+    `admin_sync:${callerWallet.trim()}`,
+    RATE_LIMITS.MANUAL_SYNC.maxRequests,
+    RATE_LIMITS.MANUAL_SYNC.windowMs,
+  );
+  if (!syncRateCheck.allowed) {
+    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Too many sync attempts. Please wait." };
+  }
+  if (!validateMessageTimestamp(signedMessage.message)) {
+    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature expired. Please sign again." };
+  }
+  const isSyncSigValid = await verifyWalletSignature(
+    callerWallet.trim(),
+    signedMessage.message,
+    signedMessage.signature,
+  );
+  if (!isSyncSigValid) {
+    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature verification failed." };
+  }
+
   try {
     const result = await syncArenaMarketCaps();
 
@@ -429,5 +518,169 @@ export async function triggerManualSync(): Promise<SyncResult> {
       skipped: 0,
       error: "Manual sync failed unexpectedly",
     };
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Squad Member Management Actions
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * Founder adds a member to their squad project.
+ * Only the project's claimed_by wallet can call this.
+ */
+export async function addSquadMemberAction(
+  projectId: string,
+  memberWallet: string,
+  founderWallet: string,
+  role: Role | undefined,
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string; alreadyMember?: boolean }> {
+  "use server";
+
+  try {
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please try again." };
+    }
+    const isValidSig = await verifyWalletSignature(founderWallet, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) return { success: false, message: "Signature verification failed." };
+
+    // Verify founder owns this project
+    const { data: project, error: projectError } = await supabase
+      .from('squad_projects')
+      .select('id, claimed_by, status')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project) return { success: false, message: "Project not found." };
+    if ((project.claimed_by as string) !== founderWallet) {
+      return { success: false, message: "Only the project founder can add members." };
+    }
+    if ((project.status as string) === 'rugged') {
+      return { success: false, message: "Cannot add members to a rugged project." };
+    }
+
+    // Target must be an opted-in network member
+    const memberProfile = await getUserProfile(memberWallet);
+    if (!memberProfile?.isOptedIn) {
+      return { success: false, message: "Target wallet is not a network member." };
+    }
+
+    const result = await addSquadMember(projectId, memberWallet, role, 'active');
+    if (result.alreadyMember) {
+      return { success: true, message: "Already a squad member.", alreadyMember: true };
+    }
+    if (!result.success) {
+      return { success: false, message: "Failed to add member." };
+    }
+
+    return { success: true, message: `${memberProfile.username} added to squad!` };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[addSquadMemberAction] Exception:', error);
+    return { success: false, message: "Failed to add member. Please try again." };
+  }
+}
+
+/**
+ * A network member requests to join a squad (pending status).
+ * The founder can see and accept pending members.
+ */
+export async function joinSquadAction(
+  projectId: string,
+  memberWallet: string,
+  role: Role | undefined,
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string }> {
+  "use server";
+
+  try {
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please try again." };
+    }
+    const isValidSig = await verifyWalletSignature(memberWallet, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) return { success: false, message: "Signature verification failed." };
+
+    const memberProfile = await getUserProfile(memberWallet);
+    if (!memberProfile?.isOptedIn) {
+      return { success: false, message: "You must join the network before applying to a squad." };
+    }
+
+    const { data: project, error: projectError } = await supabase
+      .from('squad_projects')
+      .select('id, status, name')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project) return { success: false, message: "Project not found." };
+    if ((project.status as string) === 'rugged') {
+      return { success: false, message: "Cannot join a rugged project." };
+    }
+
+    const result = await addSquadMember(projectId, memberWallet, role, 'pending');
+    if (result.alreadyMember) {
+      return { success: true, message: "Application already submitted." };
+    }
+    if (!result.success) {
+      return { success: false, message: "Failed to submit application." };
+    }
+
+    return { success: true, message: `Applied to join ${project.name as string}!` };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[joinSquadAction] Exception:', error);
+    return { success: false, message: "Failed to apply. Please try again." };
+  }
+}
+
+/** Get all members of a squad project (public read). */
+export async function getSquadMembersAction(projectId: string): Promise<SquadMember[]> {
+  "use server";
+  try {
+    return await getSquadMembers(projectId);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[getSquadMembersAction] Exception:', error);
+    return [];
+  }
+}
+
+/** Founder removes a member OR a member leaves a squad. */
+export async function removeSquadMemberAction(
+  projectId: string,
+  memberWallet: string,
+  callerWallet: string,
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string }> {
+  "use server";
+
+  try {
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please try again." };
+    }
+    const isValidSig = await verifyWalletSignature(callerWallet, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) return { success: false, message: "Signature verification failed." };
+
+    // Caller must be either the member themselves or the project founder
+    if (callerWallet !== memberWallet) {
+      const { data: project } = await supabase
+        .from('squad_projects')
+        .select('claimed_by')
+        .eq('id', projectId)
+        .single();
+
+      if (!project || (project.claimed_by as string) !== callerWallet) {
+        return { success: false, message: "Only the founder or the member themselves can remove a member." };
+      }
+    }
+
+    const ok = await removeSquadMember(projectId, memberWallet);
+    return ok
+      ? { success: true, message: "Member removed from squad." }
+      : { success: false, message: "Failed to remove member." };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[removeSquadMemberAction] Exception:', error);
+    return { success: false, message: "Failed. Please try again." };
   }
 }

@@ -1,18 +1,25 @@
 "use client";
 
+import { useState } from "react";
 import {
   UserPlus, Code, Palette, Megaphone, Waves, Users, Lock, BadgeCheck, ShieldCheck, Crown, Clock,
   DollarSign, Rocket, TrendingUp, Image, Tags, Target, Handshake, Gem, Scale,
-  AlertTriangle, Shield, Heart, UserX, Link, ShieldOff, Info,
+  AlertTriangle, Shield, Heart, UserX, Link, ShieldOff, Info, Twitter, Send, X,
   type LucideIcon,
 } from "lucide-react";
 import type { IdentityState, MatchProfile, MatchReason, UserIntent } from "@/types";
 import { getReasonConfig, sortMatchReasons, getMentorTip } from "@/lib/utils";
 
+type EndorseState = "idle" | "pending" | "success" | "already" | "error";
+
 type MatchCardProps = {
   profile: MatchProfile;
   userIntent?: UserIntent | null;
   onConnect?: () => void;
+  /** Called when user clicks Endorse — parent handles wallet signing */
+  onEndorse?: () => Promise<{ success: boolean; message: string; alreadyEndorsed?: boolean }>;
+  /** Whether the current user is opted-in (gates Endorse button visibility) */
+  isOptedIn?: boolean;
 };
 
 function formatIntent(intent: UserIntent): string {
@@ -157,7 +164,11 @@ function getIdentityGlowClass(identityState?: IdentityState): string {
   }
 }
 
-export function MatchCard({ profile, userIntent, onConnect }: MatchCardProps) {
+export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn }: MatchCardProps) {
+  const [showSocials, setShowSocials] = useState(false);
+  const [endorseState, setEndorseState] = useState<EndorseState>(
+    profile.isEndorsedByMe ? "already" : "idle",
+  );
   const avatarColor = generateAvatarColor(profile.username);
   const roleColorClass = getRoleColor(profile.role);
   const trustScoreColor = getTrustScoreColor(profile.trustScore);
@@ -206,11 +217,23 @@ export function MatchCard({ profile, userIntent, onConnect }: MatchCardProps) {
                     title="Trusted by Community"
                   >
                     <ShieldCheck className="h-4 w-4 text-amber-500" />
-                    {profile.socialProof.endorsements > 0 && (
+                    {((profile.endorsementCount ?? profile.socialProof.endorsements) > 0) && (
                       <span className="text-[10px] text-amber-400 font-medium min-w-[24px] tabular-nums tracking-tight">
-                        ({profile.socialProof.endorsements})
+                        ({profile.endorsementCount ?? profile.socialProof.endorsements})
                       </span>
                     )}
+                  </div>
+                )}
+                {/* Show endorsement count even when badge not yet earned */}
+                {!profile.socialProof.communityTrusted && (profile.endorsementCount ?? 0) > 0 && (
+                  <div
+                    className="flex items-center gap-0.5"
+                    title={`${profile.endorsementCount} endorsement(s) — needs 3 for Community Trusted badge`}
+                  >
+                    <ShieldCheck className="h-4 w-4 text-slate-500" />
+                    <span className="text-[10px] text-slate-500 font-medium tabular-nums">
+                      ({profile.endorsementCount}/3)
+                    </span>
                   </div>
                 )}
               </div>
@@ -311,7 +334,7 @@ export function MatchCard({ profile, userIntent, onConnect }: MatchCardProps) {
       {/* Trust Score */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] uppercase tracking-[0.15em] text-slate-500">Trust Score</span>
+          <span className="text-[11px] uppercase tracking-[0.15em] text-slate-500">Activity Score</span>
           <span className={`text-lg font-semibold min-w-[24px] tabular-nums tracking-tight ${trustScoreColor}`}>
             {profile.trustScore}
             <span className="text-xs text-slate-500 ml-1">/100</span>
@@ -412,20 +435,106 @@ export function MatchCard({ profile, userIntent, onConnect }: MatchCardProps) {
         </div>
       )}
 
-      {/* Connect Button */}
-      <button
-        onClick={() => {
-          if (onConnect) {
-            onConnect();
-          } else {
-            alert("Invitation sent!");
-          }
-        }}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-all duration-200 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/40"
-      >
-        <UserPlus className="h-4 w-4" />
-        <span>Connect</span>
-      </button>
+      {/* Action Buttons: Connect + Endorse */}
+      <div className="flex gap-2">
+        {/* Connect Button */}
+        {profile.socialLinks && (profile.socialLinks.twitter || profile.socialLinks.telegram) ? (
+          <button
+            onClick={() => {
+              setShowSocials((v) => !v);
+              if (onConnect) onConnect();
+            }}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-all duration-200"
+          >
+            <UserPlus className="h-4 w-4" />
+            <span>{showSocials ? "Hide" : "Connect"}</span>
+            {showSocials && <X className="h-3.5 w-3.5 opacity-60" />}
+          </button>
+        ) : (
+          <button
+            onClick={() => { if (onConnect) onConnect(); }}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-all duration-200"
+          >
+            <UserPlus className="h-4 w-4" />
+            <span>Connect</span>
+          </button>
+        )}
+
+        {/* Endorse Button — only for opted-in users, not for self */}
+        {isOptedIn && onEndorse && (
+          <button
+            disabled={endorseState === "pending" || endorseState === "already" || endorseState === "success"}
+            onClick={async () => {
+              setEndorseState("pending");
+              try {
+                const result = await onEndorse();
+                if (result.alreadyEndorsed) {
+                  setEndorseState("already");
+                } else if (result.success) {
+                  setEndorseState("success");
+                } else {
+                  setEndorseState("error");
+                  setTimeout(() => setEndorseState("idle"), 3000);
+                }
+              } catch {
+                setEndorseState("error");
+                setTimeout(() => setEndorseState("idle"), 3000);
+              }
+            }}
+            title={
+              endorseState === "already" ? "Already endorsed" :
+              endorseState === "success" ? "Endorsed!" :
+              "Endorse this member (community trust signal)"
+            }
+            className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+              endorseState === "success" || endorseState === "already"
+                ? "border-amber-500/50 bg-amber-500/10 text-amber-400 cursor-default"
+                : endorseState === "error"
+                ? "border-rose-500/30 bg-rose-500/5 text-rose-400 cursor-default"
+                : endorseState === "pending"
+                ? "border-amber-500/30 bg-amber-500/5 text-amber-400/50 cursor-wait"
+                : "border-amber-500/30 bg-amber-500/5 text-amber-400 hover:bg-amber-500/15 hover:border-amber-500/50"
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline text-xs">
+              {endorseState === "pending" ? "..." :
+               endorseState === "success" ? "Endorsed" :
+               endorseState === "already" ? "Endorsed" :
+               endorseState === "error" ? "Failed" :
+               "Endorse"}
+            </span>
+          </button>
+        )}
+      </div>
+
+      {/* Social Links Panel */}
+      {showSocials && profile.socialLinks && (profile.socialLinks.twitter || profile.socialLinks.telegram) && (
+        <div className="mt-2 flex flex-col gap-1.5 rounded-lg border border-slate-700/50 bg-slate-900/60 p-3">
+          {profile.socialLinks.twitter && (
+            <a
+              href={`https://x.com/${profile.socialLinks.twitter}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-sky-400 hover:text-sky-300 transition-colors"
+            >
+              <Twitter className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">@{profile.socialLinks.twitter}</span>
+            </a>
+          )}
+          {profile.socialLinks.telegram && (
+            <a
+              href={`https://t.me/${profile.socialLinks.telegram}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <Send className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">@{profile.socialLinks.telegram}</span>
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Match Reason - legacy human-readable summary */}
       <p className="mt-3 text-xs text-slate-500 italic text-center">

@@ -1,15 +1,6 @@
 import "server-only";
 
-import type { Badge, BadgeCategory, ConfidenceBreakdown, MatchProfile, MatchReason, SocialProof, UserIntent, WalletAnalysis } from "@/types";
-
-// Pump Match - Badge Definitions
-const BADGE_DEFINITIONS: Record<string, { label: string; category: BadgeCategory; baseWeight: number; icon: string }> = {
-  whale: { label: "Whale", category: "SYSTEM", baseWeight: 6, icon: "Waves" },
-  dev: { label: "Dev", category: "SYSTEM", baseWeight: 5, icon: "Code" },
-  og_wallet: { label: "OG Wallet", category: "SYSTEM", baseWeight: 4, icon: "Clock" },
-  community_trusted: { label: "Community Trusted", category: "SOCIAL", baseWeight: 7, icon: "ShieldCheck" },
-  governor: { label: "Governor", category: "SOCIAL", baseWeight: 12, icon: "Crown" },
-};
+import type { Badge, ConfidenceBreakdown, MatchProfile, MatchReason, SocialProof, UserIntent, WalletAnalysis } from "@/types";
 
 /**
  * Production Grade: Age Bracket Score
@@ -103,7 +94,6 @@ export function calculateMatchScore(
   if (socialScore > 0) matchReasons.push({ code: "BADGE_BONUS_SOCIAL", impact: "MEDIUM", status: "POSITIVE" });
   if (systemBadges.some((b) => b.id === "whale")) matchReasons.push({ code: "BADGE_BONUS_WHALE", impact: "HIGH", status: "POSITIVE" });
   if (systemBadges.some((b) => b.id === "dev")) matchReasons.push({ code: "BADGE_BONUS_DEV", impact: "MEDIUM", status: "POSITIVE" });
-  if (socialBadges.some((b) => b.id === "governor")) matchReasons.push({ code: "BADGE_BONUS_GOVERNOR", impact: "HIGH", status: "POSITIVE" });
 
   // 2. ASYMMETRIC ROLE BONUS
   let roleBonus = 0;
@@ -138,6 +128,31 @@ export function calculateMatchScore(
     roleBonus = 15;
     roleReason = "NFT Project Match (+15%)";
     matchReasons.push({ code: "ROLE_SYNERGY_NFT", impact: "MEDIUM", status: "POSITIVE" });
+  } else if (!userIsWhale && !userIsDeveloper && matchProfile.role === "Marketing") {
+    // Community role meets Marketing — content/growth synergy
+    roleBonus = 12;
+    roleReason = "Community Growth Match (+12%)";
+    matchReasons.push({ code: "ROLE_SYNERGY_GROWTH", impact: "MEDIUM", status: "POSITIVE" });
+  } else if (userIsDeveloper && matchProfile.role === "Community") {
+    // Developer meets Community manager — builder + community
+    roleBonus = 12;
+    roleReason = "Builder Community Match (+12%)";
+    matchReasons.push({ code: "ROLE_SYNERGY_PEER", impact: "MEDIUM", status: "POSITIVE" });
+  } else if (!userIsWhale && !userIsDeveloper && matchProfile.role === "Whale") {
+    // Community/Marketing role meets Whale — sponsorship fit
+    roleBonus = 10;
+    roleReason = "Sponsorship Match (+10%)";
+    matchReasons.push({ code: "ROLE_SYNERGY_FUNDING", impact: "MEDIUM", status: "POSITIVE" });
+  } else if (userIsWhale && matchProfile.role === "Marketing") {
+    // Whale meets Marketer — capital + distribution
+    roleBonus = 18;
+    roleReason = "Capital Growth Match (+18%)";
+    matchReasons.push({ code: "ROLE_SYNERGY_GROWTH", impact: "HIGH", status: "POSITIVE" });
+  } else if (!userIsWhale && !userIsDeveloper && matchProfile.role === "Artist") {
+    // Marketing/Community meets Artist — creative collab
+    roleBonus = 15;
+    roleReason = "Creative Collab Match (+15%)";
+    matchReasons.push({ code: "ROLE_SYNERGY_CREATIVE", impact: "MEDIUM", status: "POSITIVE" });
   }
 
   // Tag Synergy
@@ -146,11 +161,19 @@ export function calculateMatchScore(
   if (userAnalysis.tokenCount > 10) userInterests.push("DeFi");
   if (userAnalysis.tokenDiversity > 5) userInterests.push("Trading");
 
+  // Tag matching: exact match first, then word-boundary check to avoid
+  // false positives like "fi" matching "DeFi" or "Tr" matching "Trading"
   const commonTags = matchProfile.tags.filter((tag) =>
-    userInterests.some((interest) =>
-      tag.toLowerCase().includes(interest.toLowerCase()) ||
-      interest.toLowerCase().includes(tag.toLowerCase()),
-    ),
+    userInterests.some((interest) => {
+      const t = tag.toLowerCase();
+      const i = interest.toLowerCase();
+      // Exact match (highest confidence)
+      if (t === i) return true;
+      // Word-boundary match: interest is a whole word within tag, or vice versa
+      const tWords = t.split(/[\s_\-]+/);
+      const iWords = i.split(/[\s_\-]+/);
+      return tWords.some((tw) => iWords.includes(tw));
+    }),
   );
 
   const hasTagSynergy = commonTags.length > 0;
@@ -173,25 +196,55 @@ export function calculateMatchScore(
       intentReason = "Perfect Fit: Squad Builder meets Project Joiner";
       matchReasons.push({ code: "INTENT_MATCH_PERFECT", impact: "HIGH", status: "POSITIVE" });
       intentMatched = true;
-    } else if (userIntent === "FIND_FUNDING" && matchIntent === "FIND_FUNDING") {
-      intentBonus = 0;
-      intentReason = "Neutral: Both seeking funding";
-      matchReasons.push({ code: "INTENT_NEUTRAL", impact: "LOW", status: "POSITIVE" });
+    } else if (userIntent === "JOIN_PROJECT" && matchIntent === "BUILD_SQUAD") {
+      // Symmetric reverse of BUILD_SQUAD ↔ JOIN_PROJECT
+      intentBonus = 20;
+      intentReason = "Perfect Fit: Project Joiner meets Squad Builder";
+      matchReasons.push({ code: "INTENT_MATCH_PERFECT", impact: "HIGH", status: "POSITIVE" });
       intentMatched = true;
     } else if (userIntent === "HIRE_TALENT" && matchIntent === "JOIN_PROJECT") {
       intentBonus = 20;
       intentReason = "Perfect Fit: Talent Seeker meets Project Joiner";
       matchReasons.push({ code: "INTENT_MATCH_PERFECT", impact: "HIGH", status: "POSITIVE" });
       intentMatched = true;
-    } else if (userIntent === "NETWORK" && matchIntent === "NETWORK") {
-      intentBonus = 10;
-      intentReason = "Safe Match: Both networking";
-      matchReasons.push({ code: "INTENT_MATCH_SAFE", impact: "MEDIUM", status: "POSITIVE" });
+    } else if (userIntent === "JOIN_PROJECT" && matchIntent === "HIRE_TALENT") {
+      // Symmetric reverse of HIRE_TALENT ↔ JOIN_PROJECT
+      intentBonus = 20;
+      intentReason = "Perfect Fit: Project Joiner meets Talent Seeker";
+      matchReasons.push({ code: "INTENT_MATCH_PERFECT", impact: "HIGH", status: "POSITIVE" });
+      intentMatched = true;
+    } else if (userIntent === "BUILD_SQUAD" && matchIntent === "HIRE_TALENT") {
+      // Both building teams — compatible goal
+      intentBonus = 15;
+      intentReason = "Squad Match: Both building teams";
+      matchReasons.push({ code: "INTENT_MATCH_PERFECT", impact: "HIGH", status: "POSITIVE" });
+      intentMatched = true;
+    } else if (userIntent === "HIRE_TALENT" && matchIntent === "BUILD_SQUAD") {
+      // Symmetric reverse of BUILD_SQUAD ↔ HIRE_TALENT
+      intentBonus = 15;
+      intentReason = "Squad Match: Both building teams";
+      matchReasons.push({ code: "INTENT_MATCH_PERFECT", impact: "HIGH", status: "POSITIVE" });
       intentMatched = true;
     } else if (userIntent === "FIND_FUNDING" && matchIntent === "BUILD_SQUAD") {
       intentBonus = 15;
       intentReason = "Capital meets Talent";
       matchReasons.push({ code: "INTENT_MATCH_CAPITAL", impact: "HIGH", status: "POSITIVE" });
+      intentMatched = true;
+    } else if (userIntent === "BUILD_SQUAD" && matchIntent === "FIND_FUNDING") {
+      // Symmetric reverse of FIND_FUNDING ↔ BUILD_SQUAD
+      intentBonus = 15;
+      intentReason = "Capital meets Talent";
+      matchReasons.push({ code: "INTENT_MATCH_CAPITAL", impact: "HIGH", status: "POSITIVE" });
+      intentMatched = true;
+    } else if (userIntent === "NETWORK" && matchIntent === "NETWORK") {
+      intentBonus = 10;
+      intentReason = "Safe Match: Both networking";
+      matchReasons.push({ code: "INTENT_MATCH_SAFE", impact: "MEDIUM", status: "POSITIVE" });
+      intentMatched = true;
+    } else if (userIntent === "FIND_FUNDING" && matchIntent === "FIND_FUNDING") {
+      intentBonus = 0;
+      intentReason = "Neutral: Both seeking funding";
+      matchReasons.push({ code: "INTENT_NEUTRAL", impact: "LOW", status: "POSITIVE" });
       intentMatched = true;
     }
   }
@@ -280,49 +333,76 @@ export function calculateMatchScore(
 // Pool'lar artık kullanılmıyor - Sadece test profilleri kullanılıyor
 
 /**
- * v2: Intent Layer - Match Engine
- * TEST MODE: Hardcoded 2 profil döndürür
+ * Preview Match Engine — shown to non-registered (guest) users.
+ * These are illustrative profiles calculated with the real scoring engine.
+ * Registered users get real matches via getNetworkMatches() in analyzeWallet.ts.
  */
 export function getMatches(analysis: WalletAnalysis): MatchProfile[] {
-  // TEST PROFİLLERİ - Hardcoded
+  // PREVIEW PROFILES — 4 diverse roles to show the range of potential matches
   const testProfiles: Omit<MatchProfile, "matchConfidence" | "matchReason" | "socialProof" | "activeBadges" | "confidenceBreakdown" | "intent">[] = [
     {
-      id: "test-1",
+      id: "preview-1",
       username: "SolanaGod_OG",
       role: "Community",
       trustScore: 98,
       tags: ["DAO", "Governance", "Yield"],
     },
     {
-      id: "test-2",
+      id: "preview-2",
       username: "PassiveWhale",
       role: "Whale",
       trustScore: 92,
-      tags: ["HODL", "BTC"],
+      tags: ["HODL", "DeFi"],
+    },
+    {
+      id: "preview-3",
+      username: "0xDev_Mage",
+      role: "Dev",
+      trustScore: 85,
+      tags: ["DeFi", "Rust", "NFT"],
+    },
+    {
+      id: "preview-4",
+      username: "MemeLord_Rex",
+      role: "Artist",
+      trustScore: 76,
+      tags: ["NFT", "Art", "Meme"],
     },
   ];
 
   const testSocialProofs: SocialProof[] = [
     { verified: true, communityTrusted: true, endorsements: 50 },
     { verified: true, communityTrusted: false, endorsements: 5 },
+    { verified: false, communityTrusted: false, endorsements: 0 },
+    { verified: false, communityTrusted: true, endorsements: 12 },
   ];
 
   const testBadges: Badge[][] = [
-    // Profil A (Community Leader): community_trusted (+7) + governor (+12) = Raw 19 -> Decay: 7*1 + 12*0.6 = 7 + 7.2 = 14.2
+    // Profile A (Community Leader): community_trusted (+7)
     [
       { id: "community_trusted", label: "Community Trusted", category: "SOCIAL", baseWeight: 7, icon: "ShieldCheck" },
-      { id: "governor", label: "Governor", category: "SOCIAL", baseWeight: 12, icon: "Crown" },
     ],
-    // Profil B (Rich Passive): whale (+6)
+    // Profile B (Whale): whale (+6)
     [
       { id: "whale", label: "Whale", category: "SYSTEM", baseWeight: 6, icon: "Waves" },
     ],
+    // Profile C (OG Dev): dev (+5) + og_wallet (+4)
+    [
+      { id: "dev", label: "Dev", category: "SYSTEM", baseWeight: 5, icon: "Code" },
+      { id: "og_wallet", label: "OG Wallet", category: "SYSTEM", baseWeight: 4, icon: "Clock" },
+    ],
+    // Profile D (Artist): community_trusted (+7)
+    [
+      { id: "community_trusted", label: "Community Trusted", category: "SOCIAL", baseWeight: 7, icon: "ShieldCheck" },
+    ],
   ];
 
-  // v2: Intent Layer - Mock Intent'ler
+  // Preview intents — represent realistic distribution
   const testIntents: UserIntent[] = [
-    "BUILD_SQUAD", // SolanaGod_OG
-    "FIND_FUNDING", // PassiveWhale
+    "BUILD_SQUAD",   // SolanaGod_OG — wants to build
+    "FIND_FUNDING",  // PassiveWhale — capital ready
+    "JOIN_PROJECT",  // 0xDev_Mage — looking for a project
+    "NETWORK",       // MemeLord_Rex — exploring
   ];
 
   // Calculate matchConfidence for each profile

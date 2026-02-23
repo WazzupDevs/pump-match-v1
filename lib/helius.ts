@@ -1,9 +1,8 @@
 import "server-only";
 
-// API Key kontrolü ve RPC URL oluşturma
-// Support both HELIUS_API_KEY (server-only, preferred) and NEXT_PUBLIC_HELIUS_API_KEY (fallback)
-const HELIUS_API_KEY =
-  process.env.HELIUS_API_KEY || process.env.NEXT_PUBLIC_HELIUS_API_KEY;
+// SECURITY: Server-only API key. NEVER use NEXT_PUBLIC_ prefix for Helius key —
+// that would expose it to the browser bundle and allow API abuse.
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 
 if (!HELIUS_API_KEY || typeof HELIUS_API_KEY !== "string" || HELIUS_API_KEY.trim().length === 0) {
   // eslint-disable-next-line no-console
@@ -394,25 +393,9 @@ export async function getWalletTransactionData(address: string): Promise<{
       approxWalletAgeDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
     }
 
-    // ── HIDDEN KILLER FEATURE: Funding Source Detection ──
-    // Extracted from parsed nativeTransfers — no separate getTransaction RPC call needed!
-    // This is logged server-side ONLY. Never sent to client.
-    if (oldestTx.nativeTransfers && oldestTx.nativeTransfers.length > 0) {
-      const incomingTransfer = oldestTx.nativeTransfers.find(
-        (t) => t.toUserAccount === address && t.fromUserAccount !== address,
-      );
-      if (incomingTransfer) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[FUNDING_SOURCE_LOG] Wallet: ${address} funded by ${incomingTransfer.fromUserAccount} via ${firstTxSignature}`,
-        );
-      } else {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[FUNDING_SOURCE_LOG] Wallet: ${address} self-funded or funder undetectable. First tx: ${firstTxSignature}`,
-        );
-      }
-    }
+    // Funding source detection is available from nativeTransfers but intentionally
+    // NOT logged — wallet relationship data is private and must not be sent to
+    // external log aggregators (Sentry, Datadog, etc). GDPR compliance.
 
     return {
       transactionCount,
