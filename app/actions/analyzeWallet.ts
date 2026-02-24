@@ -11,8 +11,9 @@ import { getMatches } from "@/lib/match-engine";
 import {
   getUserProfile, isUserRegistered, upsertUser, findMatches, updateMatchSnapshot,
   getEndorsementCount, addEndorsement, getEndorsementCounts, getMyEndorsements,
+  leaveNetwork,
 } from "@/lib/db";
-import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
+import { checkRateLimit, RATE_LIMITS, getRedisClient } from "@/lib/rate-limiter";
 // SECURITY: Crypto helpers extracted to lib/signature.ts to avoid duplication
 import { verifyLegacySignature as verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
 import { headers } from "next/headers";
@@ -32,7 +33,9 @@ import type {
 } from "@/types";
 
 // ──────────────────────────────────────────────────────────────
-// Production Grade: Memory Cache (15-min TTL)
+// Production Grade: Upstash Redis Cache (15-min TTL)
+// Persists across Vercel serverless cold starts — replaces globalThis Map.
+// Fallback: in-memory Map for local dev when Redis is not configured.
 // Prevents Helius API spam and refresh attacks.
 // ──────────────────────────────────────────────────────────────
 
@@ -42,19 +45,52 @@ type CachedAnalysis = {
 };
 
 const ANALYSIS_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
-// SECURITY (VULN-12): Cap cache size to prevent unbounded memory growth / soft-DoS
-const MAX_ANALYSIS_CACHE_SIZE = 1000;
+const ANALYSIS_CACHE_TTL_S  = 15 * 60;         // 900 seconds (for Redis SETEX)
+const REDIS_CACHE_PREFIX    = "pump-match:analysis:";
+// SECURITY (VULN-12): Cap in-memory fallback cache size to prevent unbounded growth
+const MAX_ANALYSIS_CACHE_SIZE = 500;
 
-// Persist across hot-reloads in dev
+// In-memory fallback (dev only — evicted on cold starts in production)
 const globalForCache = globalThis as unknown as {
   analysisCache?: Map<string, CachedAnalysis>;
 };
-
 if (!globalForCache.analysisCache) {
   globalForCache.analysisCache = new Map<string, CachedAnalysis>();
 }
-
 const analysisCache = globalForCache.analysisCache;
+
+async function getCachedAnalysis(key: string): Promise<CachedAnalysis | null> {
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      const raw = await redis.get<string>(`${REDIS_CACHE_PREFIX}${key}`);
+      if (raw) return JSON.parse(raw) as CachedAnalysis;
+    } catch {
+      // Redis error → fall through to in-memory check
+    }
+  }
+  return analysisCache.get(key) ?? null;
+}
+
+async function setCachedAnalysis(key: string, value: CachedAnalysis): Promise<void> {
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      await redis.setex(`${REDIS_CACHE_PREFIX}${key}`, ANALYSIS_CACHE_TTL_S, JSON.stringify(value));
+      return;
+    } catch {
+      // Redis error → fall through to in-memory store
+    }
+  }
+  // In-memory fallback: evict oldest 10% when cap reached
+  if (analysisCache.size >= MAX_ANALYSIS_CACHE_SIZE) {
+    const evictCount = Math.ceil(MAX_ANALYSIS_CACHE_SIZE * 0.1);
+    for (const k of [...analysisCache.keys()].slice(0, evictCount)) {
+      analysisCache.delete(k);
+    }
+  }
+  analysisCache.set(key, value);
+}
 
 /**
  * Production Grade: Solana Address Validation
@@ -100,20 +136,25 @@ function calculateScore(
   // Bakiye Puanı: Max 40 puan, her 1 SOL için puan ver
   const balanceScore = Math.min(40, Math.floor(solBalance * 4));
 
-  // Aktivite Puanı: Max 40 puan
+  // Activity Score: Max 40 points — granular brackets prevent large gaps
+  // -1 sentinel = API error (getWalletTransactionData), treat as 0 for scoring
   let activityScore = 0;
 
-  // transactionCount === -1: API hatası (getWalletTransactionData sentinel değeri)
-  // transactionCount === 0: Gerçekten 0 işlem — artık isLikelyApiError mantığı yok
   const isApiError = transactionCount === -1;
   const effectiveTransactionCount = isApiError ? 0 : transactionCount;
 
   if (effectiveTransactionCount >= 1000) {
-    activityScore = 40; // OG/Whale
-  } else if (effectiveTransactionCount > 100) {
-    activityScore = 20;
-  } else if (effectiveTransactionCount > 50) {
-    activityScore = 10;
+    activityScore = 40; // OG/Power User
+  } else if (effectiveTransactionCount >= 300) {
+    activityScore = 30; // Very Active
+  } else if (effectiveTransactionCount >= 100) {
+    activityScore = 22; // Active
+  } else if (effectiveTransactionCount >= 50) {
+    activityScore = 15; // Moderate
+  } else if (effectiveTransactionCount >= 10) {
+    activityScore = 7;  // Low Activity
+  } else if (effectiveTransactionCount >= 1) {
+    activityScore = 2;  // Minimal
   }
 
   // Çeşitlilik Puanı: Max 20 puan
@@ -137,11 +178,15 @@ function calculateScore(
     explanations.push("Yüksek bakiye");
   }
   if (activityScore >= 40) {
-    explanations.push("OG/Whale aktivite seviyesi");
-  } else if (activityScore >= 20) {
-    explanations.push("Aktif kullanıcı");
-  } else if (activityScore >= 10 && !isApiError) {
-    explanations.push("Orta seviye aktivite");
+    explanations.push("OG/Power User activity level");
+  } else if (activityScore >= 30) {
+    explanations.push("Very active user");
+  } else if (activityScore >= 22) {
+    explanations.push("Active user");
+  } else if (activityScore >= 15 && !isApiError) {
+    explanations.push("Moderate activity");
+  } else if (activityScore >= 7 && !isApiError) {
+    explanations.push("Low activity");
   }
   if (diversityScore >= 15) {
     explanations.push("Çeşitli token portföyü");
@@ -184,12 +229,6 @@ function assignBadges(
     badges.push("whale");
   }
 
-  // Mock Logic => community_trusted (Social, Weight: 7)
-  // Gerçek implementasyonda burada topluluk onayı kontrolü yapılacak
-  if (solBalance > 5 && transactionCount > 50) {
-    badges.push("community_trusted");
-  }
-
   // OG Wallet: Transaction count > 1000
   if (transactionCount > 1000 && transactionCount !== -1) {
     badges.push("og_wallet");
@@ -199,6 +238,9 @@ function assignBadges(
   if (tokenDiversity > 10) {
     badges.push("dev");
   }
+
+  // community_trusted is NOT assigned here — it is only granted to opted-in
+  // users who have received >= 3 real endorsements (see analyzeWallet below).
 
   return badges;
 }
@@ -263,7 +305,7 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
   // Intent-based cache keys allowed 5x bypass (one per intent value), exhausting
   // the Helius API key. Intent is applied to the cached response without re-fetching.
   const cacheKey = trimmed;
-  const cached = analysisCache.get(cacheKey);
+  const cached = await getCachedAnalysis(cacheKey);
   if (cached && Date.now() - cached.timestamp < ANALYSIS_CACHE_TTL_MS) {
     // eslint-disable-next-line no-console
     console.log(`[analyzeWallet] Cache HIT for ${trimmed.slice(0, 8)}... (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
@@ -431,16 +473,10 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       matches,
     };
 
-    // Production Grade: Store in cache (SECURITY VULN-12: evict oldest 10% when cap reached)
-    if (analysisCache.size >= MAX_ANALYSIS_CACHE_SIZE) {
-      const evictCount = Math.ceil(MAX_ANALYSIS_CACHE_SIZE * 0.1);
-      for (const key of [...analysisCache.keys()].slice(0, evictCount)) {
-        analysisCache.delete(key);
-      }
-    }
-    analysisCache.set(cacheKey, { response, timestamp: Date.now() });
+    // Production Grade: Store in Redis (or in-memory fallback for dev)
+    await setCachedAnalysis(cacheKey, { response, timestamp: Date.now() });
     // eslint-disable-next-line no-console
-    console.log(`[analyzeWallet] Cache MISS for ${trimmed}. Stored. Cache size: ${analysisCache.size}`);
+    console.log(`[analyzeWallet] Cache MISS for ${trimmed}. Stored.`);
 
     return response;
   } catch (error) {
@@ -507,6 +543,18 @@ export async function joinNetwork(
         success: false,
         message: "Intent is required to join the network",
       };
+    }
+
+    // Social links validation
+    if (socialLinks) {
+      const twitterHandleRegex = /^[a-zA-Z0-9_]{1,15}$/;
+      const telegramHandleRegex = /^[a-zA-Z0-9_]{5,32}$/;
+      if (socialLinks.twitter && socialLinks.twitter.length > 0 && !twitterHandleRegex.test(socialLinks.twitter)) {
+        return { success: false, message: "Invalid Twitter handle." };
+      }
+      if (socialLinks.telegram && socialLinks.telegram.length > 0 && !telegramHandleRegex.test(socialLinks.telegram)) {
+        return { success: false, message: "Invalid Telegram handle." };
+      }
     }
 
     // Security & Stability - Check if user already exists to preserve joinedAt
@@ -586,6 +634,14 @@ export async function joinNetwork(
       matchFilters: existingUser?.matchFilters, // Preserve reciprocity filters
     };
 
+    // Identity state: upgrade to REACHABLE if user provided at least one social link.
+    // GHOST → REACHABLE (has social contacts) → VERIFIED (algorithmic, future)
+    const hasSocialLinks = !!(socialLinks?.twitter || socialLinks?.telegram);
+    const resolvedIdentityState: UserProfile["identityState"] =
+      hasSocialLinks && userProfile.identityState !== "VERIFIED"
+        ? "REACHABLE"
+        : userProfile.identityState;
+
     // GÜNCELLEME: Veritabanına yaz (Supabase) — tüm profil alanları
     const success = await upsertUser(address.trim(), {
         trust_score: userProfile.trustScore,
@@ -593,7 +649,7 @@ export async function joinNetwork(
         username: userProfile.username,
         activeBadges: userProfile.activeBadges,
         socialProof: userProfile.socialProof,
-        identityState: userProfile.identityState,
+        identityState: resolvedIdentityState,
         is_opted_in: true,
         intent: userProfile.intent,
         tags: userProfile.tags,         // Preserve user tags (community interests)
@@ -842,6 +898,7 @@ export async function updateProfileAction(
   updates: {
     username?: string;
     tags?: string[];
+    intent?: UserIntent;
     socialLinks?: SocialLinks;
   },
   signedMessage: { message: string; signature: string },
@@ -888,9 +945,46 @@ export async function updateProfileAction(
         .slice(0, 10);
     }
 
-    // Social links
+    // Intent: validated against known enum values
+    if (updates.intent !== undefined) {
+      const VALID_INTENTS: UserIntent[] = [
+        "BUILD_SQUAD",
+        "FIND_FUNDING",
+        "HIRE_TALENT",
+        "JOIN_PROJECT",
+        "NETWORK",
+      ];
+      if (!VALID_INTENTS.includes(updates.intent)) {
+        return { success: false, message: "Invalid intent value." };
+      }
+      upsertData.intent = updates.intent;
+    }
+
+    // Social links: validate Twitter and Telegram handles
     if (updates.socialLinks !== undefined) {
+      const { twitter, telegram } = updates.socialLinks;
+      // Twitter/X: alphanumeric + underscore, 1-15 chars
+      const twitterHandleRegex = /^[a-zA-Z0-9_]{1,15}$/;
+      // Telegram: alphanumeric + underscore, 5-32 chars
+      const telegramHandleRegex = /^[a-zA-Z0-9_]{5,32}$/;
+
+      if (twitter !== undefined && twitter.length > 0 && !twitterHandleRegex.test(twitter)) {
+        return { success: false, message: "Invalid Twitter handle. Use only letters, numbers, and underscores (max 15 chars)." };
+      }
+      if (telegram !== undefined && telegram.length > 0 && !telegramHandleRegex.test(telegram)) {
+        return { success: false, message: "Invalid Telegram handle. Use only letters, numbers, and underscores (5-32 chars)." };
+      }
       upsertData.social_links = updates.socialLinks;
+
+      // Identity upgrade: GHOST → REACHABLE when user provides at least one social link
+      const hasSocialLinks = !!(twitter || telegram);
+      if (hasSocialLinks && existing.identityState !== "VERIFIED") {
+        upsertData.identityState = "REACHABLE";
+      }
+      // Downgrade: if user clears all social links, revert to GHOST (unless VERIFIED)
+      if (!hasSocialLinks && existing.identityState === "REACHABLE") {
+        upsertData.identityState = "GHOST";
+      }
     }
 
     if (Object.keys(upsertData).length === 0) {
@@ -926,8 +1020,12 @@ export async function endorseUserAction(
   "use server";
 
   try {
-    const from = fromWallet.trim();
     const to = toWallet.trim();
+
+    // Derive authoritative fromWallet FROM the signed message content,
+    // not from the parameter — prevents IDOR via parameter tampering.
+    const fromMatch = signedMessage.message.match(/From:\s*([^\n]+)/);
+    const from = fromMatch?.[1]?.trim() ?? "";
 
     // Basic validation
     if (!from || !to) return { success: false, message: "Invalid wallet address." };
@@ -937,6 +1035,7 @@ export async function endorseUserAction(
     if (!validateMessageTimestamp(signedMessage.message)) {
       return { success: false, message: "Signature expired. Please try again." };
     }
+    // Verify sig against the from wallet derived from the message (not the client parameter)
     const isValidSig = await verifyWalletSignature(from, signedMessage.message, signedMessage.signature);
     if (!isValidSig) {
       return { success: false, message: "Signature verification failed." };
@@ -1000,5 +1099,47 @@ export async function getUserAction(address: string): Promise<UserProfile | null
     // eslint-disable-next-line no-console
     console.error(`[getUserAction] Exception for ${address}:`, error);
     return null;
+  }
+}
+
+/**
+ * GDPR Opt-Out: Leave the Pump Match Network.
+ * - Requires valid wallet signature to prevent CSRF
+ * - Anonymizes: username → "Anon", clears social_links, tags, cached_matches
+ * - Sets is_opted_in = false (user disappears from search and matchmaking)
+ * - Row is kept for trust_score audit trail; wallet can re-join later
+ */
+export async function leaveNetworkAction(
+  address: string,
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string }> {
+  "use server";
+
+  try {
+    const trimmed = address.trim();
+
+    if (!validateMessageTimestamp(signedMessage.message)) {
+      return { success: false, message: "Signature expired. Please try again." };
+    }
+    const isValidSig = await verifyWalletSignature(trimmed, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) {
+      return { success: false, message: "Signature verification failed." };
+    }
+
+    const existing = await getUserProfile(trimmed);
+    if (!existing?.isOptedIn) {
+      return { success: false, message: "You are not currently a network member." };
+    }
+
+    const ok = await leaveNetwork(trimmed);
+    if (!ok) {
+      return { success: false, message: "Failed to process opt-out. Please try again." };
+    }
+
+    return { success: true, message: "You have left the network. Your data has been anonymized." };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[leaveNetworkAction] Exception for ${address}:`, error);
+    return { success: false, message: "Opt-out failed. Please try again." };
   }
 }

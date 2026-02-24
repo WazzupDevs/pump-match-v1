@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { PublicKey } from "@solana/web3.js";  
-import { getAsset } from "@/lib/helius";
+import { getAsset, type HeliusAssetInfo } from "@/lib/helius";
 import { getUserProfile, getSquadMemberCounts } from "@/lib/db";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
 
@@ -20,14 +20,32 @@ const ENV = process.env.NODE_ENV === 'production' ? 'production' : 'development'
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 
-type ClaimErrorCode = "AUTH_REQUIRED" | "INVALID_INPUT" | "TOKEN_NOT_FOUND" | "INVALID_TOKEN_TYPE" | "ZERO_SUPPLY" | "INVALID_SYMBOL" | "RENOUNCED" | "AUTHORITY_MISMATCH" | "ALREADY_CLAIMED" | "DB_ERROR" | "RATE_LIMITED" | "SIGNATURE_FAILED";
-type ClaimResult = { success: boolean; message: string; errorCode?: ClaimErrorCode; projectId?: string; };
+type ClaimErrorCode =
+  | "AUTH_REQUIRED"
+  | "INVALID_INPUT"
+  | "TOKEN_NOT_FOUND"
+  | "INVALID_TOKEN_TYPE"
+  | "ZERO_SUPPLY"
+  | "INVALID_SYMBOL"
+  | "RENOUNCED"
+  | "AUTHORITY_MISMATCH"
+  | "ALREADY_CLAIMED"
+  | "DB_ERROR"
+  | "RATE_LIMITED"
+  | "SIGNATURE_FAILED";
 
-function extractUpdateAuthority(asset: any): string | null {
+type ClaimResult = {
+  success: boolean;
+  message: string;
+  errorCode?: ClaimErrorCode;
+  projectId?: string;
+};
+
+function extractUpdateAuthority(asset: HeliusAssetInfo): string | null {
   const metadataAuthority = asset.content?.metadata?.update_authority;
   if (metadataAuthority && metadataAuthority.length > 0) return metadataAuthority;
   if (asset.authorities && asset.authorities.length > 0) {
-    const fullAuthority = asset.authorities.find((a: any) => a.scopes.includes("full"));
+    const fullAuthority = asset.authorities.find((a) => a.scopes.includes("full"));
     if (fullAuthority) return fullAuthority.address;
     return asset.authorities[0].address;
   }
@@ -47,28 +65,29 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
   const normalizedMint = payload.mint.trim();
 
   const rateKey = `claim:${normalizedWallet}:${normalizedMint}`;
-  const claimRateLimit = (RATE_LIMITS as any).CLAIM || { maxRequests: 5, windowMs: 60000 };
-  const rateCheck = await checkRateLimit(rateKey, claimRateLimit.maxRequests, claimRateLimit.windowMs);
+  const rateCheck = await checkRateLimit(rateKey, RATE_LIMITS.CLAIM.maxRequests, RATE_LIMITS.CLAIM.windowMs);
   
   if (!rateCheck.allowed) return { success: false, errorCode: "RATE_LIMITED", message: "Too many claim attempts. Please wait." };
 
   const isExpired = Date.now() - payload.timestamp > 5 * 60 * 1000;
   if (isExpired) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Signature expired. Please sign again." };
 
-  // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY - Sadece Claim için)
-  const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${normalizedWallet}\nTarget: ${normalizedMint}\nNonce: ${payload.nonce}\nTimestamp: ${payload.timestamp}`;
-  const isValidSig = await verifyLegacySignature(normalizedWallet, expectedMessage, payload.signature);
-  if (!isValidSig) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Cryptographic verification failed. Context mismatch." };
-
-  const { error: nonceError } = await supabase.from("auth_nonces").insert({ nonce: payload.nonce, wallet_address: normalizedWallet, action: "claim_project" });
+  // Consume nonce FIRST — prevents replay/brute-force regardless of sig outcome.
+  // Each unique nonce can only be attempted once; getting new nonces is rate-limited.
+  const { error: nonceError } = await supabaseAdmin.from("auth_nonces").insert({ nonce: payload.nonce, wallet_address: normalizedWallet, action: "claim_project" });
   if (nonceError) {
     if (nonceError.code === "23505") return { success: false, errorCode: "SIGNATURE_FAILED", message: "Replay attack detected." };
     return { success: false, errorCode: "DB_ERROR", message: "Security engine error." };
   }
 
+  // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY - Sadece Claim için)
+  const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${normalizedWallet}\nTarget: ${normalizedMint}\nNonce: ${payload.nonce}\nTimestamp: ${payload.timestamp}`;
+  const isValidSig = await verifyLegacySignature(normalizedWallet, expectedMessage, payload.signature);
+  // Nonce is already consumed — do not delete it on failure (attacker burned their nonce)
+  if (!isValidSig) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Cryptographic verification failed. Context mismatch." };
+
   const userProfile = await getUserProfile(normalizedWallet);
   if (!userProfile || !userProfile.isOptedIn) {
-    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
     return { success: false, errorCode: "AUTH_REQUIRED", message: "You must join the Pump Match Network first." };
   }
 
@@ -89,7 +108,6 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
   if (isAuthorityRenounced(extractedAuthority)) return { success: false, errorCode: "RENOUNCED", message: "Project is Renounced. Community Claim coming soon." };
 
   if (!extractedAuthority || extractedAuthority.toLowerCase() !== normalizedWallet) {
-    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
     return { success: false, errorCode: "AUTHORITY_MISMATCH", message: "Ownership Verification Failed. You must be the active Update Authority." };
   }
 
@@ -97,17 +115,15 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
 
   if (existingProject) {
     if ((existingProject.claimed_by as string).toLowerCase() === normalizedWallet) return { success: true, message: "Welcome back, Founder.", projectId: existingProject.id as string };
-    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
     return { success: false, errorCode: "ALREADY_CLAIMED", message: "Project already claimed by another founder." };
   }
 
-  const { data, error } = await supabase.from("squad_projects").insert({
+  const { data, error } = await supabaseAdmin.from("squad_projects").insert({
       name: payload.name.trim(), mint_address: normalizedMint, claimed_by: normalizedWallet, symbol, project_symbol: symbol, status: "active", claim_tier: "founder", is_renounced: false, update_authority: extractedAuthority.toLowerCase(), market_cap: null, fdv: null, liquidity_usd: null, volume_24h: null, last_valid_mc: null, last_mc_update: null,
   }).select("id").single();
 
   if (error) {
     if (error.code === "23505") return { success: true, message: "Welcome back, Founder." };
-    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
     return { success: false, errorCode: "DB_ERROR", message: "Failed to claim project." };
   }
 
@@ -117,28 +133,96 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
 // ──────────────────────────────────────────────────────────────
 // Arena Leaderboard — Data Fetchers
 // ──────────────────────────────────────────────────────────────
-export type EliteAgent = { rank: number; id: string; address: string; username: string; trustScore: number; isOptedIn: boolean; identityState: string; };
-export type PowerSquadProject = { rank: number; id: string; name: string; symbol: string; mint_address: string; claimed_by: string; claimed_by_full?: string; status: string; claim_tier: string; is_renounced: boolean; market_cap: number | null; fdv: number | null; liquidity_usd: number | null; volume_24h: number | null; last_valid_mc: number | null; last_mc_update: string | null; created_at: string; memberCount: number; squad_avg_trust_score: number; dev_tier: string; dev_trust_score: number; dev_status: "EXILED" | "ACTIVE" | "UNDER_REVIEW"; project_trust_score: number; project_risk_band: "SAFE" | "LOW_RISK" | "MEDIUM" | "HIGH" | "EXTREME" | "RUGGED"; };
+export type EliteAgent = {
+  rank: number;
+  id: string;
+  address: string;
+  username: string;
+  trustScore: number;
+  isOptedIn: boolean;
+  identityState: string;
+};
+
+export type PowerSquadProject = {
+  rank: number;
+  id: string;
+  name: string;
+  symbol: string;
+  mint_address: string;
+  claimed_by: string;
+  claimed_by_full?: string;
+  status: string;
+  claim_tier: string;
+  is_renounced: boolean;
+  market_cap: number | null;
+  fdv: number | null;
+  liquidity_usd: number | null;
+  volume_24h: number | null;
+  last_valid_mc: number | null;
+  last_mc_update: string | null;
+  created_at: string;
+  memberCount: number;
+  /** Average trust score of active squad members. 0 if unknown. */
+  squad_avg_trust_score: number;
+  dev_tier: string;
+  dev_trust_score: number;
+  dev_status: "EXILED" | "ACTIVE" | "UNDER_REVIEW";
+  project_trust_score: number;
+  project_risk_band: "SAFE" | "LOW_RISK" | "MEDIUM" | "HIGH" | "EXTREME" | "RUGGED";
+};
 
 export async function getEliteAgents(): Promise<EliteAgent[]> {
-  const { data, error } = await supabase.from("users").select("id, wallet_address, username, trust_score, is_opted_in, identity_state").eq("is_opted_in", true).order("trust_score", { ascending: false }).limit(10);
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, wallet_address, username, trust_score, is_opted_in, identity_state")
+    .eq("is_opted_in", true)
+    .order("trust_score", { ascending: false })
+    .limit(10);
+
   if (error || !data) return [];
-  return data.map((row, index) => ({ rank: index + 1, id: row.id, address: row.wallet_address, username: row.username || "Unknown", trustScore: row.trust_score || 0, isOptedIn: row.is_opted_in || false, identityState: row.identity_state || "ACTIVE" }));
+
+  return data.map((row, index) => ({
+    rank: index + 1,
+    id: row.id as string,
+    address: row.wallet_address as string,
+    username: (row.username as string) || "Unknown",
+    trustScore: (row.trust_score as number) || 0,
+    isOptedIn: (row.is_opted_in as boolean) || false,
+    identityState: (row.identity_state as string) || "ACTIVE",
+  }));
 }
 
+type FounderStats = {
+  score: number;
+  tier: string;
+  status: "EXILED" | "ACTIVE" | "UNDER_REVIEW";
+};
+
 export async function getPowerSquads(): Promise<PowerSquadProject[]> {
-  const { data, error } = await supabase.from("squad_projects").select("*").order("last_valid_mc", { ascending: false, nullsFirst: false }).limit(20);
+  const { data, error } = await supabase
+    .from("squad_projects")
+    .select("*")
+    .order("last_valid_mc", { ascending: false, nullsFirst: false })
+    .limit(20);
+
   if (error || !data) return [];
 
   const projectIds = data.map((row) => row.id as string);
   const memberCountMap = await getSquadMemberCounts(projectIds);
-  const founders = Array.from(new Set(data.map(row => row.claimed_by as string).filter(Boolean)));
-  const founderMap = new Map();
+
+  const founders = Array.from(
+    new Set(data.map((row) => row.claimed_by as string).filter(Boolean)),
+  );
+  const founderMap = new Map<string, FounderStats>();
 
   if (founders.length > 0) {
-    const { data: usersData } = await supabase.from("users").select("wallet_address, trust_score, identity_state").in("wallet_address", founders);
+    const { data: usersData } = await supabase
+      .from("users")
+      .select("wallet_address, trust_score, identity_state")
+      .in("wallet_address", founders);
+
     if (usersData) {
-      usersData.forEach(u => {
+      for (const u of usersData) {
         const isExiled = u.identity_state === "EXILED";
         let mappedTier = "Newbie";
         if (!isExiled) {
@@ -147,21 +231,58 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
           else if (u.trust_score >= 400) mappedTier = "Proven";
           else if (u.trust_score >= 200) mappedTier = "Contributor";
         }
-        founderMap.set(u.wallet_address, { score: u.trust_score ?? 0, tier: isExiled ? "EXILED" : mappedTier, status: isExiled ? "EXILED" : "ACTIVE" });
-      });
+        founderMap.set(u.wallet_address as string, {
+          score: (u.trust_score as number) ?? 0,
+          tier: isExiled ? "EXILED" : mappedTier,
+          status: isExiled ? "EXILED" : "ACTIVE",
+        });
+      }
     }
   }
 
   return data.map((row, index) => {
     const founderAddr = row.claimed_by as string;
-    const maskedFounder = founderAddr && founderAddr.length > 10 ? `${founderAddr.slice(0, 4)}...${founderAddr.slice(-4)}` : founderAddr;
+    const maskedFounder =
+      founderAddr && founderAddr.length > 10
+        ? `${founderAddr.slice(0, 4)}...${founderAddr.slice(-4)}`
+        : founderAddr;
     const projectId = row.id as string;
-    const devStats = founderMap.get(founderAddr) || { score: 0, tier: "Newbie", status: "ACTIVE" };
+    const devStats: FounderStats = founderMap.get(founderAddr) ?? {
+      score: 0,
+      tier: "Newbie",
+      status: "ACTIVE",
+    };
+    const memberCount = memberCountMap.get(projectId) ?? 0;
 
     return {
-      rank: index + 1, id: projectId, name: row.name as string, symbol: (row.project_symbol as string) || (row.symbol as string) || "", mint_address: row.mint_address as string, claimed_by: maskedFounder, claimed_by_full: founderAddr, status: (row.status as string) || "active", claim_tier: (row.claim_tier as string) || "community", is_renounced: (row.is_renounced as boolean) ?? false, market_cap: row.market_cap as number | null, fdv: row.fdv as number | null, liquidity_usd: row.liquidity_usd as number | null, volume_24h: row.volume_24h as number | null, last_valid_mc: row.last_valid_mc as number | null, last_mc_update: row.last_mc_update as string | null, created_at: row.created_at as string, memberCount: memberCountMap.get(projectId) ?? 0,
-      dev_tier: devStats.tier, dev_trust_score: devStats.score, dev_status: devStats.status, project_trust_score: (row.project_trust_score as number) || 0, project_risk_band: (row.project_risk_band as any) || "EXTREME",
-      squad_avg_trust_score: memberCountMap.get(projectId) ? Math.max(0, Math.round(((row.project_trust_score as number) - (devStats.score * 0.6)) / 0.4)) : 0,
+      rank: index + 1,
+      id: projectId,
+      name: (row.project_name as string) || (row.name as string) || "",
+      symbol: (row.project_symbol as string) || "",
+      mint_address: row.mint_address as string,
+      claimed_by: maskedFounder,
+      claimed_by_full: founderAddr,
+      status: (row.status as string) || "active",
+      claim_tier: (row.claim_tier as string) || "community",
+      is_renounced: (row.is_renounced as boolean) ?? false,
+      market_cap: row.market_cap as number | null,
+      fdv: row.fdv as number | null,
+      liquidity_usd: row.liquidity_usd as number | null,
+      volume_24h: row.volume_24h as number | null,
+      last_valid_mc: row.last_valid_mc as number | null,
+      last_mc_update: row.last_mc_update as string | null,
+      created_at: row.created_at as string,
+      memberCount,
+      // squad_avg_trust_score: requires a JOIN with users for member scores.
+      // Set to 0 until a dedicated aggregation query is implemented.
+      squad_avg_trust_score: 0,
+      dev_tier: devStats.tier,
+      dev_trust_score: devStats.score,
+      dev_status: devStats.status,
+      project_trust_score: (row.project_trust_score as number) || 0,
+      project_risk_band:
+        (row.project_risk_band as PowerSquadProject["project_risk_band"]) ||
+        "EXTREME",
     };
   });
 }
@@ -172,21 +293,25 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
 export async function triggerManualSync(callerWallet: string, signedMessage: { message: string; signature: string }) {
   const adminWallet = process.env.ADMIN_WALLET;
   if (!adminWallet) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Server misconfiguration: admin wallet not set." };
-  if (!callerWallet || callerWallet.trim().toLowerCase() !== adminWallet.trim().toLowerCase()) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Unauthorized. Admin access required." };
 
+  // Rate limit and timestamp check before any crypto work
   const syncRateCheck = await checkRateLimit(`admin_sync:${callerWallet.trim()}`, RATE_LIMITS.MANUAL_SYNC.maxRequests, RATE_LIMITS.MANUAL_SYNC.windowMs);
   if (!syncRateCheck.allowed) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Too many sync attempts. Please wait." };
   if (!validateMessageTimestamp(signedMessage.message)) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature expired. Please sign again." };
-  
+
+  // Verify signature FIRST — cryptographically proves caller owns callerWallet
   // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY)
   const isSyncSigValid = await verifyLegacySignature(callerWallet.trim(), signedMessage.message, signedMessage.signature);
   if (!isSyncSigValid) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature verification failed." };
+
+  // Admin check AFTER sig verification — now we know the caller truly owns callerWallet
+  if (!callerWallet || callerWallet.trim().toLowerCase() !== adminWallet.trim().toLowerCase()) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Unauthorized. Admin access required." };
 
   try {
     const result = await syncArenaMarketCaps();
     revalidatePath("/"); revalidatePath("/arena"); revalidatePath("/leaderboard");
     return result;
-  } catch (error) {
+  } catch {
     return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Manual sync failed unexpectedly" };
   }
 }
@@ -208,13 +333,13 @@ export async function addSquadMemberAction(payload: { projectId: string; targetW
     const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(founder, payload.signature, expectedPayload);
     if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature failed." };
 
-    const { data, error } = await supabase.rpc('process_squad_transition', {
+    const { data, error } = await supabaseAdmin.rpc('process_squad_transition', {
       p_project_id: payload.projectId, p_actor: derivedActor, p_target: target, p_action: 'invite', p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
     });
 
     if (error) throw error;
     return data;
-  } catch (err: any) {
+  } catch (err) {
     console.error("[Protocol Error - addSquadMemberAction]", err);
     return { success: false, message: "Protocol execution failed." };
   }
@@ -232,13 +357,13 @@ export async function joinSquadAction(payload: { projectId: string; walletAddres
     const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(applicant, payload.signature, expectedPayload);
     if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature failed." };
 
-    const { data, error } = await supabase.rpc('process_squad_transition', {
+    const { data, error } = await supabaseAdmin.rpc('process_squad_transition', {
       p_project_id: payload.projectId, p_actor: derivedActor, p_target: applicant, p_action: 'apply', p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
     });
 
     if (error) throw error;
     return data;
-  } catch (err: any) {
+  } catch (err) {
     console.error("[Protocol Error - joinSquadAction]", err);
     return { success: false, message: "Protocol execution failed." };
   }
@@ -259,26 +384,30 @@ export async function executeSquadTransitionAction(payload: {
     const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(actor, payload.signature, expectedPayload);
     if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature verification failed." };
 
-    const { data, error } = await supabase.rpc('process_squad_transition', {
+    const { data, error } = await supabaseAdmin.rpc('process_squad_transition', {
       p_project_id: payload.projectId, p_actor: derivedActor, p_target: target, p_action: payload.actionType, p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
     });
 
     if (error) throw error;
     return data;
-  } catch (err: any) {
+  } catch (err) {
     console.error("[Protocol Error - executeSquadTransitionAction]", err);
     return { success: false, message: "Transition failed." };
   }
 }
 
 // app/actions/arena.ts dosyasının en altına eklenecek
+// Terminal states: historical records, never shown in active squad UI
+const TERMINAL_STATUSES = ['kicked', 'left', 'rejected', 'revoked'] as const;
+
 export async function getSquadMembersAction(projectId: string) {
   try {
     const { data, error } = await supabase
       .from('squad_members')
       .select('*')
-      .eq('project_id', projectId);
-      
+      .eq('project_id', projectId)
+      .not('status', 'in', `(${TERMINAL_STATUSES.join(',')})`);
+
     if (error) throw error;
     return { success: true, data };
   } catch (error) {

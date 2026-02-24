@@ -181,6 +181,9 @@ export type SearchFilters = {
   badgeFilters?: string[];   // Badge IDs (AND logic: must have ALL)
   minTrustScore?: number;    // Minimum trust score (default: 70)
   verifiedOnly?: boolean;    // Only VERIFIED identity state
+  username?: string;         // Case-insensitive partial match on username
+  limit?: number;            // Max results (default: 50, max: 100)
+  offset?: number;           // Pagination offset (default: 0)
 };
 
 // God Mode Discovery: Lightweight agent card for search results
@@ -228,7 +231,14 @@ export type SquadProject = {
   created_at: string;
 };
 
-export type SquadMemberStatus = "active" | "pending";
+export type SquadMemberStatus =
+  | "active"
+  | "pending_invite"
+  | "pending_application"
+  | "rejected"
+  | "revoked"
+  | "kicked"
+  | "left";
 
 export type SquadMember = {
   id: string;

@@ -33,9 +33,10 @@ function maskWallet(address: string) {
 /**
  * CLIENT-SIDE CANONICALIZER
  */
-function createCanonicalMessage(payload: Record<string, any>): Uint8Array {
+type CanonicalValue = string | number | boolean | null;
+function createCanonicalMessage(payload: Record<string, CanonicalValue>): Uint8Array {
   const sortedKeys = Object.keys(payload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const canonicalObject: Record<string, any> = {};
+  const canonicalObject: Record<string, CanonicalValue> = {};
   for (const key of sortedKeys) {
     canonicalObject[key] = payload[key];
   }
@@ -101,7 +102,7 @@ export function SquadCommandCenter({
       } else {
         setErrorMsg(result.message || "Protocol transition failed.");
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Transition failed:", error);
       setErrorMsg("Transaction rejected by user or network error.");
     } finally {

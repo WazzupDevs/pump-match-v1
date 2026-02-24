@@ -77,21 +77,23 @@ export interface PumpMatchPayload {
   target: string;
   timestamp: number;
   v: number;
-  [key: string]: any;
 }
 
-export function generateCanonicalMessage(payload: Record<string, any>): Uint8Array {
-  // ASCII bazlı deterministik sıralama
-  const sortedKeys = Object.keys(payload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  
-  const canonicalObject: Record<string, any> = {};
+export function generateCanonicalMessage(payload: PumpMatchPayload): Uint8Array {
+  // ASCII-based deterministic key ordering
+  type ScalarValue = string | number | boolean | null;
+  const typedPayload = payload as unknown as Record<string, ScalarValue>;
+  const sortedKeys = Object.keys(typedPayload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  const canonicalObject: Record<string, ScalarValue> = {};
   for (const key of sortedKeys) {
-    if (typeof payload[key] === 'object' && payload[key] !== null) {
+    const value = typedPayload[key];
+    if (typeof value === 'object' && value !== null) {
       throw new Error("Nested objects are not allowed in V1 Canonical JSON.");
     }
-    canonicalObject[key] = payload[key];
+    canonicalObject[key] = value;
   }
-  
+
   const canonicalString = JSON.stringify(canonicalObject);
   return new TextEncoder().encode(canonicalString);
 }
@@ -141,8 +143,8 @@ export async function verifyWalletSignature(
 
     return { isValid: true, derivedActor: publicKeyBase58.trim() };
 
-  } catch (err: any) {
-    console.error("[Signature Verification Error]", err.message);
+  } catch (err) {
+    console.error("[Signature Verification Error]", err instanceof Error ? err.message : String(err));
     return { isValid: false, error: 'Internal verification failure.' };
   }
 }

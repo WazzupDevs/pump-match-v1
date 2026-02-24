@@ -321,10 +321,11 @@ export function ArenaLeaderboard({
         <SquadMemberModal
           projectId={squadModal.projectId}
           projectName={squadModal.projectName}
-          founderWallet={squadModal.founderWallet}
+          isFounder={walletAddress.toLowerCase() === squadModal.founderWallet?.toLowerCase()}
           walletAddress={walletAddress}
           isOpen={!!squadModal}
           onClose={() => setSquadModal(null)}
+          onSuccess={fetchData}
         />
       )}
     </section>

@@ -36,9 +36,10 @@ function maskWallet(address: string) {
  * CLIENT-SIDE CANONICALIZER (V1.5 Güvenlik Katmanı)
  * Backend ile imzanın birebir eşleşmesi için objeyi sıralar ve byte'a çevirir.
  */
-function createCanonicalMessage(payload: Record<string, any>): Uint8Array {
+type CanonicalValue = string | number | boolean | null;
+function createCanonicalMessage(payload: Record<string, CanonicalValue>): Uint8Array {
   const sortedKeys = Object.keys(payload).sort((a, b) => a.localeCompare(b));
-  const canonicalObject: Record<string, any> = {};
+  const canonicalObject: Record<string, CanonicalValue> = {};
   for (const key of sortedKeys) {
     canonicalObject[key] = payload[key];
   }
@@ -136,7 +137,7 @@ export function SquadMemberModal({
       let signatureBase58: string;
       try {
         signatureBase58 = bs58.encode(await signMessage(messageBytes));
-      } catch (signError: any) {
+      } catch {
         setSubmitError("Signature request was rejected.");
         setIsSubmitting(false);
         return;

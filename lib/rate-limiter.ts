@@ -27,6 +27,8 @@ export const RATE_LIMITS = {
   MANUAL_SYNC: { maxRequests: 5, windowMs: 15 * 60 * 1000 },
   // endorseUser: 5 endorsements per day per wallet
   ENDORSE: { maxRequests: 5, windowMs: 24 * 60 * 60 * 1000 },
+  // claimProject: 5 claims per minute per wallet+mint combo
+  CLAIM: { maxRequests: 5, windowMs: 60 * 1000 },
 } as const;
 
 export type RateLimitResult =
@@ -47,12 +49,13 @@ function msToUpstashDuration(ms: number): `${number} ${"ms" | "s" | "m" | "h" | 
 let redis: Redis | null = null;
 let redisInitAttempted = false;
 
-// Returns Redis instance or null if env vars are not configured
-function tryGetRedis(): Redis | null {
+// Returns Redis instance or null if env vars are not configured.
+// Exported so other modules (e.g. analyzeWallet cache) can reuse the same connection.
+export function getRedisClient(): Redis | null {
   if (redisInitAttempted) return redis;
   redisInitAttempted = true;
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const url  = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
   if (!url || !token) {
@@ -96,10 +99,18 @@ export async function checkRateLimit(
   maxRequests: number,
   windowMs: number,
 ): Promise<RateLimitResult> {
-  const r = tryGetRedis();
+  const r = getRedisClient();
 
-  // Upstash not configured — fail-open for local dev
-  if (!r) return { allowed: true };
+  // Fail-closed in production: if Redis is not configured, deny all requests.
+  // Fail-open only in development/test environments.
+  if (!r) {
+    if (process.env.NODE_ENV === 'production') {
+      // eslint-disable-next-line no-console
+      console.error('[rate-limiter] Redis not configured in production. Blocking request for safety.');
+      return { allowed: false, retryAfterMs: 60_000 };
+    }
+    return { allowed: true }; // local dev: allow without rate limiting
+  }
 
   const limiter = getRatelimit(r, maxRequests, windowMs);
   const result = await limiter.limit(identifier);

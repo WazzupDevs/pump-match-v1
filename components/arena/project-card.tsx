@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Crown, Trophy, Medal, Ghost, Droplets, TrendingUp, Skull,
@@ -15,7 +15,24 @@ import { TrustBadge } from "@/components/arena/trust-badge";
 import { getSquadMembersAction } from "@/app/actions/arena";
 
 // 🔥 YENİ: Squad Yönetim Modalı
-import ManageSquadModal from "@/components/ManageSquadModal";// import { getSquadMembers } from "@/lib/db"; 
+import ManageSquadModal from "@/components/ManageSquadModal"; // import { getSquadMembers } from "@/lib/db";
+
+type SquadMemberStatus =
+  | "active"
+  | "pending_invite"
+  | "pending_application"
+  | "rejected"
+  | "revoked"
+  | "kicked"
+  | "left";
+
+type SquadMember = {
+  id: string;
+  wallet_address: string;
+  role: string;
+  status: SquadMemberStatus;
+  joined_at?: string;
+}; 
 
 // ──────────────────────────────────────────────────────────────
 // Formatters
@@ -47,8 +64,10 @@ function timeAgo(isoDate: string | null): string {
 // ──────────────────────────────────────────────────────────────
 // Risk Band Badge
 // ──────────────────────────────────────────────────────────────
+type RiskBandConfig = { color: string; icon: ReactNode; label: string };
+
 function RiskBandBadge({ band, score }: { band: string, score: number }) {
-  const configs: Record<string, any> = {
+  const configs: Record<string, RiskBandConfig> = {
     SAFE: { color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-[0_0_10px_-2px_rgba(16,185,129,0.3)]", icon: <ShieldCheck className="h-3 w-3" />, label: "SAFE" },
     LOW_RISK: { color: "bg-blue-500/10 text-blue-400 border-blue-500/30", icon: <Shield className="h-3 w-3" />, label: "LOW RISK" },
     MEDIUM: { color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30", icon: <AlertTriangle className="h-3 w-3" />, label: "MEDIUM RISK" },
@@ -166,7 +185,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
   
   // 🔥 YENİ: Modal State'leri ve Cüzdan
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
-  const [squadMembers, setSquadMembers] = useState<any[]>([]); 
+  const [squadMembers, setSquadMembers] = useState<SquadMember[]>([]); 
   const { publicKey } = useWallet();
   const router = useRouter();
 
@@ -210,7 +229,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
     
     // 3. Veri geldiyse State'i güncelle (Modal anında dolu verilerle güncellenecek)
     if (result.success && result.data) {
-      setSquadMembers(result.data);
+      setSquadMembers(result.data as SquadMember[]);
     }
   };
 

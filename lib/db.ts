@@ -1,5 +1,5 @@
-import { supabase } from './supabase';
-import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters, Role, Badge, SocialProof, IdentityState, UserIntent, SocialLinks, SquadMember, SquadMemberStatus } from '@/types';
+import { supabase, supabaseAdmin } from './supabase';
+import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters, Role, Badge, SocialProof, IdentityState, UserIntent, SocialLinks } from '@/types';
 
 // Strongly-typed input for upsertUser (replaces Partial<Record<string, unknown>>)
 type UpsertUserData = {
@@ -25,7 +25,23 @@ function toValidRole(value: unknown): Role {
 
 // ── YARDIMCI: Tip Dönüşümleri ──
 // Supabase'den gelen veriyi bizim UserProfile tipine çevirir
+/**
+ * Compute reputationDecay (0.0–1.0) from lastActiveAt.
+ * 1.0 = active in last 7 days (full reputation)
+ * 0.7 = active 7–30 days ago (slight decay)
+ * 0.3 = active 30–90 days ago (significant decay)
+ * 0.1 = inactive 90+ days (near-full decay)
+ */
+function computeReputationDecay(lastActiveAt: number): number {
+  const daysSinceActive = (Date.now() - lastActiveAt) / (24 * 60 * 60 * 1000);
+  if (daysSinceActive <= 7)  return 1.0;
+  if (daysSinceActive <= 30) return 0.7;
+  if (daysSinceActive <= 90) return 0.3;
+  return 0.1;
+}
+
 function mapDbUserToProfile(dbUser: Record<string, unknown>): UserProfile {
+  const lastActiveAt = (dbUser.last_active_at as number) || Date.now();
   return {
     id: dbUser.id as string,
     address: dbUser.wallet_address as string,
@@ -40,10 +56,11 @@ function mapDbUserToProfile(dbUser: Record<string, unknown>): UserProfile {
       endorsements: 0,
     },
     activeBadges: (dbUser.active_badges as UserProfile['activeBadges']) || [],
-    lastActiveAt: (dbUser.last_active_at as number) || Date.now(),
+    lastActiveAt,
     isOptedIn: dbUser.is_opted_in === true,
     joinedAt: (dbUser.joined_at as number) || Date.now(),
     identityState: (dbUser.identity_state as UserProfile['identityState']) || 'GHOST',
+    reputationDecay: computeReputationDecay(lastActiveAt),
     matchFilters: dbUser.match_filters as UserProfile['matchFilters'],
     cachedMatches: dbUser.cached_matches as UserProfile['cachedMatches'],
     lastMatchSnapshotAt: dbUser.last_match_snapshot_at as number | undefined,
@@ -64,10 +81,16 @@ export async function getUserProfile(wallet: string): Promise<UserProfile | null
   return mapDbUserToProfile(data);
 }
 
-// isUserRegistered: async wrapper that checks DB
+// isUserRegistered: lightweight existence check — avoids SELECT * overhead
 export async function isUserRegistered(wallet: string): Promise<boolean> {
-  const profile = await getUserProfile(wallet);
-  return profile?.isOptedIn === true;
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, is_opted_in')
+    .eq('wallet_address', wallet)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  return (data as { is_opted_in: boolean }).is_opted_in === true;
 }
 
 export async function upsertUser(wallet: string, partialData: UpsertUserData) {
@@ -95,7 +118,7 @@ export async function upsertUser(wallet: string, partialData: UpsertUserData) {
     }
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('users')
     .upsert(dbData, { onConflict: 'wallet_address' })
     .select()
@@ -124,9 +147,16 @@ export async function findMatches(
   // (matches comment in match-engine.ts: "anything beyond 7 days is filtered by Sleeping Logic in db.ts")
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
+  // Explicit column list: excludes 'cached_matches' JSONB to avoid fetching large blobs
+  const MATCH_COLUMNS = [
+    'id', 'wallet_address', 'username', 'level', 'trust_score', 'tags',
+    'intent', 'social_proof', 'active_badges', 'last_active_at', 'is_opted_in',
+    'joined_at', 'identity_state', 'match_filters', 'last_match_snapshot_at', 'social_links',
+  ].join(', ');
+
   const { data, error } = await supabase
     .from('users')
-    .select('*')
+    .select(MATCH_COLUMNS)
     .eq('is_opted_in', true)
     .neq('wallet_address', userAddress)
     .gte('last_active_at', sevenDaysAgo)
@@ -138,12 +168,13 @@ export async function findMatches(
     return [];
   }
 
-  return data.map(mapDbUserToProfile);
+  // Cast needed: Supabase loses generic inference when select() receives a string variable
+  return (data as unknown as Record<string, unknown>[]).map(mapDbUserToProfile);
 }
 
 // Snapshot güncelleme
 export async function updateMatchSnapshot(wallet: string, matches: MatchProfile[]) {
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('users')
     .update({
       cached_matches: matches,
@@ -167,7 +198,7 @@ export async function addEndorsement(
   fromWallet: string,
   toWallet: string,
 ): Promise<{ success: boolean; alreadyEndorsed: boolean }> {
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('endorsements')
     .insert({ from_wallet: fromWallet, to_wallet: toWallet });
 
@@ -251,9 +282,18 @@ export async function getMyEndorsements(
 // ── 4. GOD MODE / SEARCH ──
 
 export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgent[]> {
+  // Explicit columns: NetworkAgent only needs a subset of user fields
+  const SEARCH_COLUMNS = [
+    'id', 'wallet_address', 'username', 'level',
+    'trust_score', 'identity_state', 'active_badges', 'tags',
+  ].join(', ');
+
+  const limit  = Math.min(filters.limit  ?? 50, 100); // cap at 100
+  const offset = filters.offset ?? 0;
+
   let query = supabase
     .from('users')
-    .select('*')
+    .select(SEARCH_COLUMNS)
     .eq('is_opted_in', true); // Only search opted-in agents
 
   if (filters.minTrustScore) {
@@ -264,6 +304,11 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
     query = query.eq('identity_state', 'VERIFIED');
   }
 
+  if (filters.username && filters.username.trim().length > 0) {
+    // Case-insensitive partial match (Postgres ilike)
+    query = query.ilike('username', `%${filters.username.trim()}%`);
+  }
+
   if (filters.badgeFilters && filters.badgeFilters.length > 0) {
     for (const badgeId of filters.badgeFilters) {
       // JSONB array containment: pass array of objects directly, not JSON string
@@ -271,11 +316,12 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
     }
   }
 
-  const { data, error } = await query.limit(50);
+  const { data, error } = await query.range(offset, offset + limit - 1);
 
   if (error || !data) return [];
 
-  return data.map((user) => ({
+  // Cast needed: Supabase loses generic inference when select() receives a string variable
+  return (data as unknown as Record<string, unknown>[]).map((user) => ({
     id: user.id as string,
     address: user.wallet_address as string,
     username: (user.username as string) || 'Anon',
@@ -288,55 +334,10 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
 }
 
 // ── 5. SQUAD MEMBER MANAGEMENT ──
-
-function maskAddress(address: string): string {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 4)}...${address.slice(-4)}`;
-}
-
-function mapDbMember(row: Record<string, unknown>): SquadMember {
-  return {
-    id: row.id as string,
-    projectId: row.project_id as string,
-    walletAddress: row.wallet_address as string,
-    displayAddress: maskAddress(row.wallet_address as string),
-    role: row.role as SquadMember['role'],
-    status: (row.status as SquadMemberStatus) ?? 'active',
-    joinedAt: row.joined_at as string,
-  };
-}
-
-/** Add a member to a squad. Idempotent — UNIQUE(project_id, wallet_address). */
-export async function addSquadMember(
-  projectId: string,
-  walletAddress: string,
-  role?: string,
-  status: SquadMemberStatus = 'active',
-): Promise<{ success: boolean; alreadyMember: boolean }> {
-  const { error } = await supabase
-    .from('squad_members')
-    .insert({ project_id: projectId, wallet_address: walletAddress, role: role ?? null, status });
-
-  if (error) {
-    if (error.code === '23505') return { success: true, alreadyMember: true };
-    // eslint-disable-next-line no-console
-    console.error('[addSquadMember] Error:', error);
-    return { success: false, alreadyMember: false };
-  }
-  return { success: true, alreadyMember: false };
-}
-
-/** Get all members of a squad project. */
-export async function getSquadMembers(projectId: string): Promise<SquadMember[]> {
-  const { data, error } = await supabase
-    .from('squad_members')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('joined_at', { ascending: true });
-
-  if (error || !data) return [];
-  return data.map(mapDbMember);
-}
+// NOTE: addSquadMember, getSquadMembers and removeSquadMember were removed.
+// All squad writes MUST go through the process_squad_transition stored procedure
+// via executeSquadTransitionAction / addSquadMemberAction / joinSquadAction in arena.ts.
+// All squad reads use getSquadMembersAction (arena.ts) which filters terminal states.
 
 /** Get all squads a wallet address belongs to. */
 export async function getMySquads(walletAddress: string): Promise<string[]> {
@@ -370,18 +371,31 @@ export async function getSquadMemberCounts(projectIds: string[]): Promise<Map<st
   return counts;
 }
 
-/** Remove a member from a squad. Only founder or the member themselves can do this (enforced at action layer). */
-export async function removeSquadMember(projectId: string, walletAddress: string): Promise<boolean> {
-  const { error } = await supabase
-    .from('squad_members')
-    .delete()
-    .eq('project_id', projectId)
-    .eq('wallet_address', walletAddress);
+/**
+ * GDPR opt-out: anonymize and deactivate a user profile.
+ * Sets is_opted_in = false and wipes PII fields (username, social_links, tags,
+ * cached_matches). The wallet_address row is kept so trust_score history is preserved
+ * but the user is no longer visible in the network or matched.
+ */
+export async function leaveNetwork(wallet: string): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({
+      is_opted_in: false,
+      username: 'Anon',
+      social_links: null,
+      tags: [],
+      cached_matches: null,
+      last_match_snapshot_at: null,
+      last_active_at: Date.now(),
+    })
+    .eq('wallet_address', wallet);
 
   if (error) {
     // eslint-disable-next-line no-console
-    console.error('[removeSquadMember] Error:', error);
+    console.error('[leaveNetwork] Error:', error);
     return false;
   }
   return true;
 }
+

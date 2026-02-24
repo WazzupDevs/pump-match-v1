@@ -103,7 +103,7 @@ export function ClaimProjectModal({
       try {
         const signatureBytes = await signMessage(messageBytes);
         signatureBase58 = bs58.encode(signatureBytes);
-      } catch (signError: any) {
+      } catch {
         setSubmitError("Signature request was rejected or failed. Proof of Authority is required to claim a project.");
         setIsSubmitting(false);
         return;

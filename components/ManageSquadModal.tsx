@@ -4,6 +4,23 @@ import { useEffect } from "react";
 import { X, ShieldAlert, Wallet } from "lucide-react";
 import { SquadCommandCenter } from "./SquadCommandCenter";
 
+type SquadMemberStatus =
+  | "active"
+  | "pending_invite"
+  | "pending_application"
+  | "rejected"
+  | "revoked"
+  | "kicked"
+  | "left";
+
+type SquadMember = {
+  id: string;
+  wallet_address: string;
+  role: string;
+  status: SquadMemberStatus;
+  joined_at?: string;
+};
+
 interface ManageSquadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -13,7 +30,7 @@ interface ManageSquadModalProps {
     claimed_by: string;
   };
   currentUserWallet?: string | null;
-  members: any[]; 
+  members: SquadMember[];
   onRefresh: () => void;
 }
 
@@ -107,7 +124,7 @@ export default function ManageSquadModal({
                 <div>
                   <p className="text-sm font-medium text-slate-200">Signature Verification Required</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    This action requires a wallet signature to confirm it's really you. Your request will be verified by the protocol.
+                    This action requires a wallet signature to confirm it&apos;s really you. Your request will be verified by the protocol.
                   </p>
                 </div>
               </div>
