@@ -1,16 +1,11 @@
 /**
  * Server-only cryptographic signature utilities for Pump Match.
- * Used by server actions to verify wallet ownership (Ed25519).
- *
- * Centralising here avoids duplicating the same ~60 lines across every
- * "use server" file that needs signature verification.
+ * Includes V1.5 Canonical JSON Engine + Legacy Plaintext Handlers
  */
 import "server-only";
 
-// ─── Base58 Decode ────────────────────────────────────────────────────────────
-
-const BASE58_ALPHABET =
-  "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+// ─── 1. BASE58 DECODE & UTILS ───
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 function base58Decode(encoded: string): Uint8Array {
   const bytes = [0];
@@ -34,20 +29,22 @@ function base58Decode(encoded: string): Uint8Array {
   return new Uint8Array(bytes.reverse());
 }
 
-// TypeScript requires a standalone ArrayBuffer (not ArrayBufferLike) for crypto.subtle.
-// Node Buffers use a shared pool so .buffer is ArrayBufferLike — slice to get ArrayBuffer.
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
-// ─── Ed25519 Signature Verification ──────────────────────────────────────────
+// ─── 2. LEGACY SYSTEM (AnalyzeWallet ve Eski Sync işlemleri için) ───
+export const MESSAGE_MAX_AGE_MS = 5 * 60 * 1000;
 
-/**
- * Verify an Ed25519 wallet signature (Solana).
- * Proves that the caller owns the private key for `walletAddress`
- * without requiring an on-chain transaction.
- */
-export async function verifyWalletSignature(
+export function validateMessageTimestamp(message: string): boolean {
+  const match = message.match(/Timestamp:\s*(\d+)/);
+  if (!match) return false;
+  const ts = parseInt(match[1], 10);
+  if (isNaN(ts)) return false;
+  return Math.abs(Date.now() - ts) <= MESSAGE_MAX_AGE_MS;
+}
+
+export async function verifyLegacySignature(
   walletAddress: string,
   message: string,
   signatureBase64: string,
@@ -59,6 +56,71 @@ export async function verifyWalletSignature(
     const signatureBytes = Uint8Array.from(Buffer.from(signatureBase64, "base64"));
 
     const key = await subtle.importKey(
+      "raw", toArrayBuffer(publicKeyBytes), { name: "Ed25519" }, false, ["verify"]
+    );
+
+    return await subtle.verify("Ed25519", key, toArrayBuffer(signatureBytes), toArrayBuffer(messageBytes));
+  } catch {
+    return false;
+  }
+}
+
+// ─── 3. PUMPMATCH V1.5 CANONICAL JSON ENGINE (Squad İşlemleri İçin) ───
+export interface PumpMatchPayload {
+  action: string;
+  chain: string;
+  domain: string;
+  env: string;
+  nonce: string;
+  project: string;
+  role: string;
+  target: string;
+  timestamp: number;
+  v: number;
+  [key: string]: any;
+}
+
+export function generateCanonicalMessage(payload: Record<string, any>): Uint8Array {
+  // ASCII bazlı deterministik sıralama
+  const sortedKeys = Object.keys(payload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  
+  const canonicalObject: Record<string, any> = {};
+  for (const key of sortedKeys) {
+    if (typeof payload[key] === 'object' && payload[key] !== null) {
+      throw new Error("Nested objects are not allowed in V1 Canonical JSON.");
+    }
+    canonicalObject[key] = payload[key];
+  }
+  
+  const canonicalString = JSON.stringify(canonicalObject);
+  return new TextEncoder().encode(canonicalString);
+}
+
+export async function verifyWalletSignature(
+  publicKeyBase58: string, 
+  signatureBase58: string, 
+  expectedPayload: PumpMatchPayload
+): Promise<{ isValid: boolean; derivedActor?: string; error?: string }> {
+  try {
+    if (expectedPayload.v !== 1) return { isValid: false, error: 'Unsupported protocol version.' };
+    if (expectedPayload.domain !== 'pumpmatch-governance') return { isValid: false, error: 'Invalid domain separation.' };
+    if (expectedPayload.env !== 'production' && expectedPayload.env !== 'development') {
+      return { isValid: false, error: 'Invalid environment.' };
+    }
+
+    const now = Date.now();
+    const ts = expectedPayload.timestamp;
+    
+    if (!ts || typeof ts !== 'number') return { isValid: false, error: 'Invalid timestamp.' };
+    if (ts > now + 30 * 1000) return { isValid: false, error: 'Clock drift: Timestamp in future.' };
+    if (ts < now - 5 * 60 * 1000) return { isValid: false, error: 'Signature expired.' };
+
+    const messageBytes = generateCanonicalMessage(expectedPayload);
+    const publicKeyBytes = base58Decode(publicKeyBase58.trim());
+    const signatureBytes = base58Decode(signatureBase58.trim());
+
+    const { subtle } = globalThis.crypto;
+    const key = await subtle.importKey(
       "raw",
       toArrayBuffer(publicKeyBytes),
       { name: "Ed25519" },
@@ -66,35 +128,21 @@ export async function verifyWalletSignature(
       ["verify"],
     );
 
-    return await subtle.verify(
+    const isVerified = await subtle.verify(
       "Ed25519",
       key,
       toArrayBuffer(signatureBytes),
       toArrayBuffer(messageBytes),
     );
-  } catch {
-    return false;
+
+    if (!isVerified) {
+      return { isValid: false, error: 'Cryptographic signature mismatch.' };
+    }
+
+    return { isValid: true, derivedActor: publicKeyBase58.trim() };
+
+  } catch (err: any) {
+    console.error("[Signature Verification Error]", err.message);
+    return { isValid: false, error: 'Internal verification failure.' };
   }
-}
-
-// ─── Timestamp Validation ─────────────────────────────────────────────────────
-
-/**
- * SECURITY (VULN-07): Signed message timestamp validation.
- *
- * Prevents replay attacks — a captured signature is only valid for
- * MESSAGE_MAX_AGE_MS milliseconds after it was created.
- *
- * Convention: the signed message must contain a line of the form
- *   Timestamp: <unix_ms>
- * (any amount of whitespace between "Timestamp:" and the number is accepted).
- */
-export const MESSAGE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
-
-export function validateMessageTimestamp(message: string): boolean {
-  const match = message.match(/Timestamp:\s*(\d+)/);
-  if (!match) return false;
-  const ts = parseInt(match[1], 10);
-  if (isNaN(ts)) return false;
-  return Math.abs(Date.now() - ts) <= MESSAGE_MAX_AGE_MS;
 }

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, Rocket, AlertTriangle } from "lucide-react";
+import { X, Loader2, Rocket, AlertTriangle, ShieldCheck } from "lucide-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
 import { claimProjectAction } from "@/app/actions/arena";
 
 interface ClaimProjectModalProps {
@@ -23,6 +25,9 @@ export function ClaimProjectModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Cüzdanın imza atabilmesi için hook'u çağırıyoruz
+  const { signMessage } = useWallet();
 
   // Reset form when modal opens
   useEffect(() => {
@@ -65,22 +70,54 @@ export function ClaimProjectModal({
     setSubmitError(null);
     setSuccessMsg(null);
 
-    if (!projectName.trim()) {
+    const normalizedName = projectName.trim();
+    const normalizedMint = contractAddress.trim();
+    const normalizedWallet = walletAddress.trim().toLowerCase();
+
+    if (!normalizedName) {
       setSubmitError("Project name is required.");
       return;
     }
-    if (!contractAddress.trim()) {
+    if (!normalizedMint) {
       setSubmitError("Contract address (CA) is required.");
+      return;
+    }
+    if (!signMessage) {
+      setSubmitError("Your wallet does not support message signing. Please use a supported wallet like Phantom or Solflare.");
       return;
     }
 
     setIsSubmitting(true);
+    
     try {
-      const result = await claimProjectAction(
-        projectName,
-        contractAddress,
-        walletAddress,
-      );
+      // 1. PAS-v1 Güvenlik Parametrelerini Üret (Nonce & Timestamp)
+      const nonce = crypto.randomUUID();
+      const timestamp = Date.now();
+
+      // 2. Deterministik Mesajı İnşa Et (Backend'deki ile harfi harfine aynı olmalı)
+      const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${normalizedWallet}\nTarget: ${normalizedMint}\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
+      const messageBytes = new TextEncoder().encode(expectedMessage);
+
+      // 3. Kullanıcıya İmzalat
+      let signatureBase58: string;
+      try {
+        const signatureBytes = await signMessage(messageBytes);
+        signatureBase58 = bs58.encode(signatureBytes);
+      } catch (signError: any) {
+        setSubmitError("Signature request was rejected or failed. Proof of Authority is required to claim a project.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 4. İmzayı ve Payload'u Backend'e Fırlat
+      const result = await claimProjectAction({
+        name: normalizedName,
+        mint: normalizedMint,
+        walletAddress: walletAddress, // Orijinal halini yolluyoruz, backend kendi normalize ediyor
+        nonce: nonce,
+        timestamp: timestamp,
+        signature: signatureBase58
+      });
 
       if (result.success) {
         setSuccessMsg(result.message);
@@ -91,8 +128,9 @@ export function ClaimProjectModal({
       } else {
         setSubmitError(result.message);
       }
-    } catch {
-      setSubmitError("An unexpected error occurred. Please try again.");
+    } catch (error) {
+      console.error("[Claim Modal] Unexpected error:", error);
+      setSubmitError("An unexpected error occurred while processing your cryptographic signature.");
     } finally {
       setIsSubmitting(false);
     }
@@ -123,11 +161,11 @@ export function ClaimProjectModal({
             <Rocket className="h-5 w-5 text-emerald-400" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">
-              Claim Project
+            <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+              Claim Project <ShieldCheck className="h-4 w-4 text-emerald-400" />
             </h2>
             <p className="text-xs text-slate-500">
-              Add your token to the Arena leaderboard
+              Zero-Trust Founder Verification
             </p>
           </div>
         </div>
@@ -204,21 +242,22 @@ export function ClaimProjectModal({
               !contractAddress.trim() ||
               !!successMsg
             }
-            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_15px_-3px_rgba(16,185,129,0.4)]"
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Verifying...
+                Signing...
               </>
             ) : (
-              "Claim Project"
+              "Sign & Claim"
             )}
           </button>
         </div>
 
-        <p className="mt-4 text-center text-[10px] text-slate-600">
-          Token will be verified on-chain via Helius before claiming.
+        <p className="mt-4 text-center text-[10px] text-slate-500 flex items-center justify-center gap-1.5">
+          <ShieldCheck className="h-3 w-3" />
+          Requires cryptographic signature to verify Authority
         </p>
       </div>
     </div>

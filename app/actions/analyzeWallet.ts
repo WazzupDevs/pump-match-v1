@@ -14,7 +14,7 @@ import {
 } from "@/lib/db";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
 // SECURITY: Crypto helpers extracted to lib/signature.ts to avoid duplication
-import { verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
+import { verifyLegacySignature as verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
 import { headers } from "next/headers";
 
 import type {

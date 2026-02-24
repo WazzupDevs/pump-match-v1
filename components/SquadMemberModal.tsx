@@ -1,368 +1,282 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { X, Loader2, UserPlus, UserMinus, Users, ShieldCheck } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { X, Loader2, Users, AlertTriangle, ShieldCheck, UserPlus, Briefcase, Wallet } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import {
-  getSquadMembersAction,
-  addSquadMemberAction,
-  joinSquadAction,
-  removeSquadMemberAction,
-} from "@/app/actions/arena";
-import type { Role, SquadMember } from "@/types";
+import { PublicKey } from "@solana/web3.js";
+import bs58 from "bs58";
+import { addSquadMemberAction, joinSquadAction } from "@/app/actions/arena";
+
+type RoleType = "developer" | "marketing" | "community" | "designer" | "advisor";
 
 interface SquadMemberModalProps {
-  projectId: string;
-  projectName: string;
-  /** Founder wallet address — if caller matches, show founder controls */
-  founderWallet: string;
-  /** The current connected wallet */
-  walletAddress: string;
   isOpen: boolean;
   onClose: () => void;
+  projectId: string;
+  projectName: string;
+  isFounder: boolean;
+  walletAddress: string;
+  onSuccess: () => void;
 }
 
-const VALID_ROLES: Role[] = ["Dev", "Artist", "Marketing", "Whale", "Community"];
+const ROLES = [
+  { value: "developer", label: "Developer", desc: "Smart Contracts & Tech" },
+  { value: "marketing", label: "Marketing", desc: "Growth & Shilling" },
+  { value: "community", label: "Community Lead", desc: "Discord & Telegram" },
+  { value: "designer", label: "Designer", desc: "UI/UX & Art" },
+  { value: "advisor", label: "Advisor", desc: "Strategy & Networking" },
+];
+
+function maskWallet(address: string) {
+  if (!address || address.length < 10) return address;
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+/**
+ * CLIENT-SIDE CANONICALIZER (V1.5 Güvenlik Katmanı)
+ * Backend ile imzanın birebir eşleşmesi için objeyi sıralar ve byte'a çevirir.
+ */
+function createCanonicalMessage(payload: Record<string, any>): Uint8Array {
+  const sortedKeys = Object.keys(payload).sort((a, b) => a.localeCompare(b));
+  const canonicalObject: Record<string, any> = {};
+  for (const key of sortedKeys) {
+    canonicalObject[key] = payload[key];
+  }
+  return new TextEncoder().encode(JSON.stringify(canonicalObject));
+}
 
 export function SquadMemberModal({
-  projectId,
-  projectName,
-  founderWallet,
-  walletAddress,
   isOpen,
   onClose,
+  projectId,
+  projectName,
+  isFounder,
+  walletAddress,
+  onSuccess,
 }: SquadMemberModalProps) {
+  const [targetWallet, setTargetWallet] = useState("");
+  const [selectedRole, setSelectedRole] = useState<RoleType>("marketing");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
   const { signMessage } = useWallet();
-  const isFounder = walletAddress === founderWallet;
-
-  const [members, setMembers] = useState<SquadMember[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [addWallet, setAddWallet] = useState("");
-  const [addRole, setAddRole] = useState<Role | "">("");
-  const [isAdding, setIsAdding] = useState(false);
-  const [isJoining, setIsJoining] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
-
-  const fetchMembers = useCallback(async () => {
-    setLoading(true);
-    const result = await getSquadMembersAction(projectId);
-    setMembers(result);
-    setLoading(false);
-  }, [projectId]);
 
   useEffect(() => {
     if (isOpen) {
-      fetchMembers();
-      setAddWallet("");
-      setAddRole("");
-      setActionError(null);
-      setActionSuccess(null);
+      setTargetWallet("");
+      setSelectedRole("marketing");
+      setSubmitError(null);
+      setSuccessMsg(null);
     }
-  }, [isOpen, fetchMembers]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => { 
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [isOpen, onClose]);
 
-  const handleBackdropClick = useCallback(
-    (e: React.MouseEvent) => { if (e.target === backdropRef.current) onClose(); },
+  const handleOverlayClick = useCallback(
+    (e: React.MouseEvent) => { if (e.target === overlayRef.current) onClose(); },
     [onClose],
   );
 
-  async function buildSignedMessage(action: string): Promise<{ message: string; signature: string } | null> {
-    if (!signMessage) return null;
-    const message = `Pump Match Squad ${action}\nProject: ${projectId}\nCaller: ${walletAddress}\nTimestamp: ${Date.now()}`;
-    const bytes = new TextEncoder().encode(message);
-    const sigBytes = await signMessage(bytes);
-    const signature = btoa(String.fromCharCode(...sigBytes));
-    return { message, signature };
-  }
+  const handleSubmit = async () => {
+    setSubmitError(null);
+    setSuccessMsg(null);
 
-  async function handleAddMember() {
-    const target = addWallet.trim();
-    if (!target) return;
-    setIsAdding(true);
-    setActionError(null);
-    setActionSuccess(null);
+    let normalizedWallet: string;
+    let normalizedTarget: string;
+
     try {
-      const signed = await buildSignedMessage("Add Member");
-      if (!signed) { setActionError("Wallet signing not available."); return; }
-      const result = await addSquadMemberAction(
-        projectId, target, walletAddress, addRole as Role || undefined, signed,
-      );
-      if (result.success) {
-        setActionSuccess(result.message);
-        setAddWallet("");
-        setAddRole("");
-        await fetchMembers();
-      } else {
-        setActionError(result.message);
-      }
+      normalizedWallet = new PublicKey(walletAddress.trim()).toBase58();
+      normalizedTarget = isFounder ? new PublicKey(targetWallet.trim()).toBase58() : normalizedWallet;
     } catch {
-      setActionError("Action failed. Please try again.");
+      setSubmitError("Invalid Solana wallet address detected. Please verify the public key.");
+      return;
+    }
+
+    if (!signMessage) {
+      setSubmitError("Your wallet does not support message signing.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    
+    try {
+      const nonce = crypto.randomUUID();
+      const timestamp = Date.now();
+      
+      // 🔥 DÜZELTİLDİ: Backend Enum'larına ("invite" ve "apply") göre eşleşen aksiyon tipleri
+      const actionType = isFounder ? "invite" : "apply";
+      
+      // 🔥 DÜZELTİLDİ: Düz metin yerine Canonical JSON Objensi oluşturuyoruz
+      const payloadObj = {
+        action: actionType,
+        chain: "solana-mainnet",
+        domain: "pumpmatch-governance",
+        env: process.env.NODE_ENV === "production" ? "production" : "development",
+        nonce: nonce,
+        project: projectId,
+        role: selectedRole,
+        target: normalizedTarget,
+        timestamp: timestamp,
+        v: 1
+      };
+
+      const messageBytes = createCanonicalMessage(payloadObj);
+
+      let signatureBase58: string;
+      try {
+        signatureBase58 = bs58.encode(await signMessage(messageBytes));
+      } catch (signError: any) {
+        setSubmitError("Signature request was rejected.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      let result;
+      if (isFounder) {
+        result = await addSquadMemberAction({
+          projectId,
+          targetWallet: normalizedTarget,
+          founderWallet: normalizedWallet,
+          role: selectedRole,
+          nonce,
+          timestamp,
+          signature: signatureBase58
+        });
+      } else {
+        result = await joinSquadAction({
+          projectId,
+          walletAddress: normalizedWallet,
+          role: selectedRole,
+          nonce,
+          timestamp,
+          signature: signatureBase58
+        });
+      }
+
+      if (result.success) {
+        setSuccessMsg(isFounder ? "Invitation sent successfully!" : "Application submitted successfully!");
+        setTimeout(() => {
+          onSuccess();
+          onClose();
+        }, 1500);
+      } else {
+        setSubmitError(result.message);
+      }
+    } catch (error) {
+      console.error("[Squad Modal] Unexpected error:", error);
+      setSubmitError("An unexpected error occurred. Please try again later.");
     } finally {
-      setIsAdding(false);
+      setIsSubmitting(false);
     }
-  }
-
-  async function handleJoinSquad() {
-    setIsJoining(true);
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      const signed = await buildSignedMessage("Join");
-      if (!signed) { setActionError("Wallet signing not available."); return; }
-      const result = await joinSquadAction(projectId, walletAddress, addRole as Role || undefined, signed);
-      if (result.success) {
-        setActionSuccess(result.message);
-        await fetchMembers();
-      } else {
-        setActionError(result.message);
-      }
-    } catch {
-      setActionError("Action failed. Please try again.");
-    } finally {
-      setIsJoining(false);
-    }
-  }
-
-  async function handleRemoveMember(memberWallet: string) {
-    try {
-      const signed = await buildSignedMessage("Remove Member");
-      if (!signed) return;
-      const result = await removeSquadMemberAction(projectId, memberWallet, walletAddress, signed);
-      if (result.success) {
-        setActionSuccess(result.message);
-        await fetchMembers();
-      } else {
-        setActionError(result.message);
-      }
-    } catch {
-      setActionError("Remove failed. Please try again.");
-    }
-  }
-
-  const isMember = members.some((m) => m.walletAddress === walletAddress && m.status === 'active');
-  const hasPendingApp = members.some((m) => m.walletAddress === walletAddress && m.status === 'pending');
+  };
 
   if (!isOpen) return null;
 
   return (
-    <div
-      ref={backdropRef}
-      onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="relative w-full max-w-lg rounded-2xl border border-slate-700/60 bg-zinc-900/95 backdrop-blur-xl shadow-xl animate-in zoom-in-95 fade-in duration-200 max-h-[85vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
+    <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="relative w-full max-w-md rounded-2xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-lg p-6 shadow-2xl shadow-blue-500/10 animate-in fade-in zoom-in-95 duration-200">
+        
+        <button type="button" onClick={onClose} className="absolute top-4 right-4 rounded-full p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 flex items-center justify-center">
+            {isFounder ? <UserPlus className="h-5 w-5 text-blue-400" /> : <Users className="h-5 w-5 text-blue-400" />}
+          </div>
           <div>
             <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-              <Users className="h-5 w-5 text-emerald-400" />
-              {projectName} — Squad
+              {isFounder ? "Invite Squad Member" : "Apply to Squad"}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {isFounder ? "Manage your team" : "Apply to join this squad"}
+            <p className="text-xs text-slate-500 truncate max-w-[250px]">
+              {isFounder ? `Send an invite to join ${projectName}` : `Request to join ${projectName}`}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-full p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
-          >
-            <X className="h-5 w-5" />
+        </div>
+
+        <div className="space-y-5">
+          {isFounder ? (
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1.5">
+                Target Wallet Address
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 8xAd... (Solana Public Key)"
+                value={targetWallet}
+                onChange={(e) => setTargetWallet(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-colors font-mono text-xs"
+              />
+            </div>
+          ) : (
+            <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-slate-400" />
+                <span className="text-xs text-slate-400 uppercase tracking-wider">Applying as:</span>
+              </div>
+              <span className="font-mono text-xs text-slate-200 font-medium bg-slate-900/50 px-2 py-1 rounded">
+                {maskWallet(walletAddress)}
+              </span>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-2">
+              <span className="flex items-center gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Select Proposed Role</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {ROLES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setSelectedRole(r.value as RoleType)}
+                  className={`flex flex-col items-start p-2.5 rounded-lg border text-left transition-all ${
+                    selectedRole === r.value
+                      ? "border-blue-500 bg-blue-500/10 shadow-[0_0_10px_-2px_rgba(59,130,246,0.2)]"
+                      : "border-slate-700/60 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600"
+                  }`}
+                >
+                  <span className={`text-xs font-bold ${selectedRole === r.value ? "text-blue-400" : "text-slate-300"}`}>{r.label}</span>
+                  <span className="text-[9px] text-slate-500 mt-0.5">{r.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {submitError && (
+          <div className="mt-5 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2.5">
+            <AlertTriangle className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-rose-300 leading-snug">{submitError}</p>
+          </div>
+        )}
+        {successMsg && (
+          <div className="mt-5 flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
+            <ShieldCheck className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-emerald-300 leading-snug">{successMsg}</p>
+          </div>
+        )}
+
+        <div className="mt-6 flex items-center gap-3">
+          <button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1 rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-sm text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="button" onClick={handleSubmit} disabled={isSubmitting || (isFounder && !targetWallet.trim()) || !!successMsg} className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-slate-50 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_15px_-3px_rgba(59,130,246,0.4)]">
+            {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing...</> : isFounder ? "Sign & Send Invite" : "Sign & Send Request"}
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* Action feedback */}
-          {actionSuccess && (
-            <div className="px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-300">
-              {actionSuccess}
-            </div>
-          )}
-          {actionError && (
-            <div className="px-3 py-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-sm text-rose-400">
-              {actionError}
-            </div>
-          )}
-
-          {/* Member list */}
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-3">
-              Members ({members.filter(m => m.status === 'active').length})
-            </p>
-            {loading ? (
-              <div className="flex items-center gap-2 text-slate-500 text-sm">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading...
-              </div>
-            ) : members.filter(m => m.status === 'active').length === 0 ? (
-              <p className="text-sm text-slate-600 italic">No active members yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {members.filter(m => m.status === 'active').map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {member.walletAddress === founderWallet && (
-                        <ShieldCheck className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" aria-label="Founder" />
-                      )}
-                      <span className="text-sm text-slate-300 font-mono truncate">
-                        {member.displayAddress}
-                      </span>
-                      {member.role && (
-                        <span className="text-[10px] text-slate-500 border border-slate-700 rounded px-1.5 py-0.5 flex-shrink-0">
-                          {member.role}
-                        </span>
-                      )}
-                    </div>
-                    {/* Founder can remove anyone; member can remove themselves */}
-                    {(isFounder || member.walletAddress === walletAddress) &&
-                      member.walletAddress !== founderWallet && (
-                      <button
-                        onClick={() => handleRemoveMember(member.walletAddress)}
-                        className="ml-2 p-1 rounded text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex-shrink-0"
-                        title="Remove member"
-                      >
-                        <UserMinus className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Pending applications (founder only) */}
-            {isFounder && members.filter(m => m.status === 'pending').length > 0 && (
-              <div className="mt-4">
-                <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-2">
-                  Pending Applications
-                </p>
-                <div className="space-y-2">
-                  {members.filter(m => m.status === 'pending').map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2"
-                    >
-                      <span className="text-sm text-slate-300 font-mono">{member.displayAddress}</span>
-                      <button
-                        onClick={async () => {
-                          // Accept: re-add with active status (remove pending, add active)
-                          await handleRemoveMember(member.walletAddress);
-                          const signed = await buildSignedMessage("Accept Member");
-                          if (signed) {
-                            await addSquadMemberAction(
-                              projectId, member.walletAddress, walletAddress,
-                              member.role, signed,
-                            );
-                            await fetchMembers();
-                          }
-                        }}
-                        className="text-xs px-2 py-1 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                      >
-                        Accept
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Add member (founder only) */}
-          {isFounder && (
-            <div className="border-t border-slate-800 pt-5">
-              <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-3">
-                Add Member by Wallet
-              </p>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={addWallet}
-                  onChange={(e) => setAddWallet(e.target.value)}
-                  placeholder="Solana wallet address"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/60 transition-colors font-mono"
-                />
-                <div className="flex gap-2">
-                  <select
-                    value={addRole}
-                    onChange={(e) => setAddRole(e.target.value as Role | "")}
-                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500/60 transition-colors"
-                  >
-                    <option value="">Role (optional)</option>
-                    {VALID_ROLES.map((r) => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={handleAddMember}
-                    disabled={!addWallet.trim() || isAdding}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                    Add
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Join squad (non-founders who are not yet members) */}
-          {!isFounder && !isMember && !hasPendingApp && (
-            <div className="border-t border-slate-800 pt-5">
-              <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-3">
-                Apply to Join
-              </p>
-              <div className="flex gap-2">
-                <select
-                  value={addRole}
-                  onChange={(e) => setAddRole(e.target.value as Role | "")}
-                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500/60 transition-colors"
-                >
-                  <option value="">My Role (optional)</option>
-                  {VALID_ROLES.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleJoinSquad}
-                  disabled={isJoining}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  {isJoining ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                  Apply
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!isFounder && hasPendingApp && (
-            <div className="border-t border-slate-800 pt-4">
-              <p className="text-sm text-amber-400/70 italic">Application pending founder approval.</p>
-            </div>
-          )}
-          {!isFounder && isMember && (
-            <div className="border-t border-slate-800 pt-4 flex items-center justify-between">
-              <p className="text-sm text-emerald-400">You are an active member.</p>
-              <button
-                onClick={() => handleRemoveMember(walletAddress)}
-                className="text-xs px-2 py-1 rounded border border-rose-500/30 bg-rose-500/5 text-rose-400 hover:bg-rose-500/15 transition-colors"
-              >
-                Leave Squad
-              </button>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

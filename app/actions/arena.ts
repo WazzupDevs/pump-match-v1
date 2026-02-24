@@ -1,686 +1,288 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { PublicKey } from "@solana/web3.js";  
 import { getAsset } from "@/lib/helius";
-import { getUserProfile, addSquadMember, getSquadMembers, removeSquadMember, getSquadMemberCounts } from "@/lib/db";
-import type { SquadMember, Role } from "@/types";
+import { getUserProfile, getSquadMemberCounts } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
-import { verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
 
-// ──────────────────────────────────────────────────────────────
-// Arena Financial Snapshot Engine — Secure Claim Action
-// Production-Grade: Proof of Authority (Founder Gate)
-// ──────────────────────────────────────────────────────────────
+// 🔥 TEK VE DOĞRU İMPORT SATIRI (Çakışmaları önler)
+import { 
+  verifyWalletSignature, 
+  verifyLegacySignature, 
+  validateMessageTimestamp, 
+  type PumpMatchPayload 
+} from "@/lib/signature";
 
+const ENV = process.env.NODE_ENV === 'production' ? 'production' : 'development';
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-
-// Solana System Program = renounced authority sentinel
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 
-type ClaimErrorCode =
-  | "AUTH_REQUIRED"
-  | "INVALID_INPUT"
-  | "TOKEN_NOT_FOUND"
-  | "INVALID_TOKEN_TYPE"
-  | "ZERO_SUPPLY"
-  | "INVALID_SYMBOL"
-  | "RENOUNCED"
-  | "AUTHORITY_MISMATCH"
-  | "ALREADY_CLAIMED"
-  | "DB_ERROR";
+type ClaimErrorCode = "AUTH_REQUIRED" | "INVALID_INPUT" | "TOKEN_NOT_FOUND" | "INVALID_TOKEN_TYPE" | "ZERO_SUPPLY" | "INVALID_SYMBOL" | "RENOUNCED" | "AUTHORITY_MISMATCH" | "ALREADY_CLAIMED" | "DB_ERROR" | "RATE_LIMITED" | "SIGNATURE_FAILED";
+type ClaimResult = { success: boolean; message: string; errorCode?: ClaimErrorCode; projectId?: string; };
 
-type ClaimResult = {
-  success: boolean;
-  message: string;
-  errorCode?: ClaimErrorCode;
-  projectId?: string;
-};
-
-/**
- * Extract the Update Authority from a Helius DAS asset response.
- *
- * Priority:
- *   1. content.metadata.update_authority (primary, most reliable)
- *   2. authorities[] array — find entry with "full" scope
- *   3. null if neither present
- */
-function extractUpdateAuthority(asset: {
-  content?: { metadata?: { update_authority?: string } };
-  authorities?: Array<{ address: string; scopes: string[] }>;
-}): string | null {
-  // Primary source
+function extractUpdateAuthority(asset: any): string | null {
   const metadataAuthority = asset.content?.metadata?.update_authority;
-  if (metadataAuthority && metadataAuthority.length > 0) {
-    return metadataAuthority;
-  }
-
-  // Fallback: authorities array (look for "full" scope = update authority)
+  if (metadataAuthority && metadataAuthority.length > 0) return metadataAuthority;
   if (asset.authorities && asset.authorities.length > 0) {
-    const fullAuthority = asset.authorities.find((a) =>
-      a.scopes.includes("full"),
-    );
-    if (fullAuthority) {
-      return fullAuthority.address;
-    }
-    // If no "full" scope, take the first authority as best guess
+    const fullAuthority = asset.authorities.find((a: any) => a.scopes.includes("full"));
+    if (fullAuthority) return fullAuthority.address;
     return asset.authorities[0].address;
   }
-
   return null;
 }
 
-/**
- * Check if an authority address indicates the token is renounced.
- * Renounced = authority is null, empty, or the Solana System Program.
- */
 function isAuthorityRenounced(authority: string | null): boolean {
   if (!authority || authority.trim().length === 0) return true;
   return authority.trim() === SYSTEM_PROGRAM;
 }
 
-/**
- * Claim a token project for a squad in the Arena.
- *
- * Final Hardened Logic — Production-Grade:
- *   1. Auth Guard — user must be opted-in network member
- *   2. Input Normalization — sanitize + Base58 format check
- *   3. Helius Truth Gate — on-chain verification via DAS getAsset
- *      a. Token existence + fungible type + supply > 0 + symbol validation
- *      b. Authority extraction (deterministic: metadata primary → authorities[] fallback)
- *      c. Renounced/invalid check — MVP blocks, future: community claim tier
- *   4. Idempotency & Replay Protection — explicit DB lookup before insert
- *      - Same founder re-claiming → success ("Welcome back, Founder.")
- *      - Different wallet → rejection ("Already claimed by another founder.")
- *   5. Proof of Authority — wallet must match on-chain update authority
- *   6. DB Commit — insert with claim_tier='founder', is_renounced=false
- */
-export async function claimProjectAction(
-  name: string,
-  ca: string,
-  walletAddress: string,
-): Promise<ClaimResult> {
-  const normalizedWallet = walletAddress.trim();
+// ──────────────────────────────────────────────────────────────
+// Arena Financial Snapshot Engine — Secure Claim Action
+// ──────────────────────────────────────────────────────────────
+export async function claimProjectAction(payload: { name: string; mint: string; walletAddress: string; nonce: string; timestamp: number; signature: string; }): Promise<ClaimResult> {
+  const normalizedWallet = payload.walletAddress.trim().toLowerCase();
+  const normalizedMint = payload.mint.trim();
 
-  // ── 1. Auth Guard ──
+  const rateKey = `claim:${normalizedWallet}:${normalizedMint}`;
+  const claimRateLimit = (RATE_LIMITS as any).CLAIM || { maxRequests: 5, windowMs: 60000 };
+  const rateCheck = await checkRateLimit(rateKey, claimRateLimit.maxRequests, claimRateLimit.windowMs);
+  
+  if (!rateCheck.allowed) return { success: false, errorCode: "RATE_LIMITED", message: "Too many claim attempts. Please wait." };
+
+  const isExpired = Date.now() - payload.timestamp > 5 * 60 * 1000;
+  if (isExpired) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Signature expired. Please sign again." };
+
+  // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY - Sadece Claim için)
+  const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${normalizedWallet}\nTarget: ${normalizedMint}\nNonce: ${payload.nonce}\nTimestamp: ${payload.timestamp}`;
+  const isValidSig = await verifyLegacySignature(normalizedWallet, expectedMessage, payload.signature);
+  if (!isValidSig) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Cryptographic verification failed. Context mismatch." };
+
+  const { error: nonceError } = await supabase.from("auth_nonces").insert({ nonce: payload.nonce, wallet_address: normalizedWallet, action: "claim_project" });
+  if (nonceError) {
+    if (nonceError.code === "23505") return { success: false, errorCode: "SIGNATURE_FAILED", message: "Replay attack detected." };
+    return { success: false, errorCode: "DB_ERROR", message: "Security engine error." };
+  }
+
   const userProfile = await getUserProfile(normalizedWallet);
-
   if (!userProfile || !userProfile.isOptedIn) {
-    return {
-      success: false,
-      errorCode: "AUTH_REQUIRED",
-      message: "You must join the Pump Match Network before claiming a project.",
-    };
+    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
+    return { success: false, errorCode: "AUTH_REQUIRED", message: "You must join the Pump Match Network first." };
   }
 
-  // ── 2. Input Normalization ──
-  const mintAddress = ca.trim();
-  const projectName = name.trim();
+  if (!payload.name || payload.name.length < 1 || payload.name.length > 60) return { success: false, errorCode: "INVALID_INPUT", message: "Invalid project name." };
+  if (!BASE58_REGEX.test(normalizedMint)) return { success: false, errorCode: "INVALID_INPUT", message: "Invalid contract address." };
 
-  if (!projectName || projectName.length < 1 || projectName.length > 60) {
-    return {
-      success: false,
-      errorCode: "INVALID_INPUT",
-      message: "Project name must be between 1 and 60 characters.",
-    };
-  }
+  const asset = await getAsset(normalizedMint);
+  if (!asset) return { success: false, errorCode: "TOKEN_NOT_FOUND", message: "Token not found on-chain." };
 
-  if (!BASE58_REGEX.test(mintAddress)) {
-    return {
-      success: false,
-      errorCode: "INVALID_INPUT",
-      message: "Invalid contract address. Must be a valid Solana Base58 address.",
-    };
-  }
+  const isFungible = asset.interface === "FungibleToken" || asset.interface === "FungibleAsset";
+  if (!isFungible) return { success: false, errorCode: "INVALID_TOKEN_TYPE", message: "Only fungible tokens can be claimed." };
+  if ((asset.token_info?.supply ?? 0) <= 0) return { success: false, errorCode: "ZERO_SUPPLY", message: "Token supply is zero." };
 
-  // ── 3. Helius Truth Gate ──
-  const asset = await getAsset(mintAddress);
-
-  if (!asset) {
-    return {
-      success: false,
-      errorCode: "TOKEN_NOT_FOUND",
-      message: "Token not found on-chain. Verify the contract address.",
-    };
-  }
-
-  // 3a. Interface must be fungible
-  const isFungible =
-    asset.interface === "FungibleToken" || asset.interface === "FungibleAsset";
-  if (!isFungible) {
-    return {
-      success: false,
-      errorCode: "INVALID_TOKEN_TYPE",
-      message: `Invalid token type: "${asset.interface}". Only fungible tokens can be claimed.`,
-    };
-  }
-
-  // 3a. Anti-Rug: supply must be > 0
-  const supply = asset.token_info?.supply ?? 0;
-  if (supply <= 0) {
-    return {
-      success: false,
-      errorCode: "ZERO_SUPPLY",
-      message: "Token supply is zero. This may be a rugged or invalid token.",
-    };
-  }
-
-  // 3a. Symbol validation: 2-10 chars
   const symbol = asset.content?.metadata?.symbol ?? "";
-  if (symbol.length < 2 || symbol.length > 10) {
-    return {
-      success: false,
-      errorCode: "INVALID_SYMBOL",
-      message: `Token symbol "${symbol}" is invalid. Must be 2-10 characters.`,
-    };
-  }
+  if (symbol.length < 2 || symbol.length > 10) return { success: false, errorCode: "INVALID_SYMBOL", message: "Invalid token symbol." };
 
-  // 3b. Extract Update Authority (Deterministic)
   const extractedAuthority = extractUpdateAuthority(asset);
+  if (isAuthorityRenounced(extractedAuthority)) return { success: false, errorCode: "RENOUNCED", message: "Project is Renounced. Community Claim coming soon." };
 
-  // 3c. Renounced / Invalid Authority Check
-  if (isAuthorityRenounced(extractedAuthority)) {
-    return {
-      success: false,
-      errorCode: "RENOUNCED",
-      message:
-        "This project is Renounced. Community Claim features are coming soon.",
-    };
+  if (!extractedAuthority || extractedAuthority.toLowerCase() !== normalizedWallet) {
+    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
+    return { success: false, errorCode: "AUTHORITY_MISMATCH", message: "Ownership Verification Failed. You must be the active Update Authority." };
   }
 
-  // ── 4. Idempotency & Replay Protection ──
-  // Explicit DB check BEFORE authority verification — prevents unnecessary
-  // Helius comparisons for already-claimed mints and enables "Welcome back".
-  const { data: existingProject, error: lookupError } = await supabase
-    .from("squad_projects")
-    .select("id, claimed_by")
-    .eq("mint_address", mintAddress)
-    .maybeSingle();
-
-  if (lookupError) {
-    // eslint-disable-next-line no-console
-    console.error("[claimProjectAction] DB lookup error:", lookupError);
-    return {
-      success: false,
-      errorCode: "DB_ERROR",
-      message: "Failed to verify project status. Please try again.",
-    };
-  }
+  const { data: existingProject } = await supabase.from("squad_projects").select("id, claimed_by").eq("mint_address", normalizedMint).maybeSingle();
 
   if (existingProject) {
-    const existingOwner = (existingProject.claimed_by as string) ?? "";
-    if (existingOwner.toLowerCase() === normalizedWallet.toLowerCase()) {
-      // Same founder re-claiming — idempotent success
-      return {
-        success: true,
-        message: "Welcome back, Founder. Your project is already in the Arena.",
-        projectId: existingProject.id as string,
-      };
-    }
-    // Different wallet trying to claim the same mint
-    return {
-      success: false,
-      errorCode: "ALREADY_CLAIMED",
-      message: "Project already claimed by another founder.",
-    };
+    if ((existingProject.claimed_by as string).toLowerCase() === normalizedWallet) return { success: true, message: "Welcome back, Founder.", projectId: existingProject.id as string };
+    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
+    return { success: false, errorCode: "ALREADY_CLAIMED", message: "Project already claimed by another founder." };
   }
 
-  // ── 5. Proof of Authority (The Gate) ──
-  // Connected wallet MUST be the active on-chain update authority
-  if (extractedAuthority!.toLowerCase() !== normalizedWallet.toLowerCase()) {
-    return {
-      success: false,
-      errorCode: "AUTHORITY_MISMATCH",
-      message:
-        "Ownership Verification Failed. You must be the active Update Authority to claim as Founder.",
-    };
-  }
-
-  // ── 6. DB Commit ──
-  const { data, error } = await supabase
-    .from("squad_projects")
-    .insert({
-      name: projectName,
-      mint_address: mintAddress,
-      claimed_by: normalizedWallet,
-      symbol,
-      project_symbol: symbol,
-      status: "active",
-      claim_tier: "founder",
-      is_renounced: false,
-      update_authority: extractedAuthority,
-      market_cap: null,
-      fdv: null,
-      liquidity_usd: null,
-      volume_24h: null,
-      last_valid_mc: null,
-      last_mc_update: null,
-    })
-    .select("id")
-    .single();
+  const { data, error } = await supabase.from("squad_projects").insert({
+      name: payload.name.trim(), mint_address: normalizedMint, claimed_by: normalizedWallet, symbol, project_symbol: symbol, status: "active", claim_tier: "founder", is_renounced: false, update_authority: extractedAuthority.toLowerCase(), market_cap: null, fdv: null, liquidity_usd: null, volume_24h: null, last_valid_mc: null, last_mc_update: null,
+  }).select("id").single();
 
   if (error) {
-    // Race condition safety net: unique constraint hit between our check and insert
-    if (error.code === "23505") {
-      return {
-        success: true,
-        message: "Welcome back, Founder. Your project is already in the Arena.",
-      };
-    }
-
-    // eslint-disable-next-line no-console
-    console.error("[claimProjectAction] Supabase insert error:", error);
-    return {
-      success: false,
-      errorCode: "DB_ERROR",
-      message: "Failed to claim project. Please try again.",
-    };
+    if (error.code === "23505") return { success: true, message: "Welcome back, Founder." };
+    await supabase.from("auth_nonces").delete().eq("nonce", payload.nonce);
+    return { success: false, errorCode: "DB_ERROR", message: "Failed to claim project." };
   }
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[Arena] Founder claim: ${projectName} ($${symbol}) by ${normalizedWallet.slice(0, 8)}... | authority: ${extractedAuthority} | mint: ${mintAddress}`,
-  );
-
-  return {
-    success: true,
-    message: `${projectName} ($${symbol}) has been claimed as Founder and is now in the Arena!`,
-    projectId: data?.id as string | undefined,
-  };
+  return { success: true, message: `${payload.name} ($${symbol}) has been claimed!`, projectId: data?.id as string | undefined };
 }
 
 // ──────────────────────────────────────────────────────────────
-// Arena Leaderboard — Data Fetchers (Pure DB Reads)
+// Arena Leaderboard — Data Fetchers
 // ──────────────────────────────────────────────────────────────
+export type EliteAgent = { rank: number; id: string; address: string; username: string; trustScore: number; isOptedIn: boolean; identityState: string; };
+export type PowerSquadProject = { rank: number; id: string; name: string; symbol: string; mint_address: string; claimed_by: string; claimed_by_full?: string; status: string; claim_tier: string; is_renounced: boolean; market_cap: number | null; fdv: number | null; liquidity_usd: number | null; volume_24h: number | null; last_valid_mc: number | null; last_mc_update: string | null; created_at: string; memberCount: number; squad_avg_trust_score: number; dev_tier: string; dev_trust_score: number; dev_status: "EXILED" | "ACTIVE" | "UNDER_REVIEW"; project_trust_score: number; project_risk_band: "SAFE" | "LOW_RISK" | "MEDIUM" | "HIGH" | "EXTREME" | "RUGGED"; };
 
-export type EliteAgent = {
-  rank: number;
-  id: string;
-  address: string;
-  username: string;
-  trustScore: number;
-  isOptedIn: boolean;
-  identityState: string;
-};
-
-export type PowerSquadProject = {
-  rank: number;
-  id: string;
-  name: string;
-  symbol: string;
-  mint_address: string;
-  claimed_by: string;          // masked address for display
-  claimed_by_full?: string;    // unmasked, only for founder check in SquadMemberModal
-  status: string;
-  claim_tier: string;
-  is_renounced: boolean;
-  market_cap: number | null;
-  fdv: number | null;
-  liquidity_usd: number | null;
-  volume_24h: number | null;
-  last_valid_mc: number | null;
-  last_mc_update: string | null;
-  created_at: string;
-  memberCount: number;         // active squad members
-};
-
-/**
- * Fetch top 10 opted-in agents sorted by trust_score DESC.
- * Pure DB read — no live API calls.
- */
 export async function getEliteAgents(): Promise<EliteAgent[]> {
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, wallet_address, username, trust_score, is_opted_in, identity_state")
-    .eq("is_opted_in", true)
-    .order("trust_score", { ascending: false })
-    .limit(10);
-
-  if (error || !data) {
-    // eslint-disable-next-line no-console
-    console.error("[getEliteAgents] Supabase error:", error);
-    return [];
-  }
-
-  return data.map((row, index) => {
-    // SECURITY (VULN-10): Mask full wallet address in public leaderboard.
-    // Exposes only first 4 + last 4 chars — sufficient for identification,
-    // prevents phishing/dust-attack targeting via the leaderboard API.
-    const fullAddress = row.wallet_address as string;
-    const maskedAddress =
-      fullAddress.length > 10
-        ? `${fullAddress.slice(0, 4)}...${fullAddress.slice(-4)}`
-        : fullAddress;
-
-    return {
-      rank: index + 1,
-      id: row.id as string,
-      address: maskedAddress,
-      username: (row.username as string) || "Anon",
-      trustScore: row.trust_score as number,
-      isOptedIn: true,
-      identityState: (row.identity_state as string) || "GHOST",
-    };
-  });
+  const { data, error } = await supabase.from("users").select("id, wallet_address, username, trust_score, is_opted_in, identity_state").eq("is_opted_in", true).order("trust_score", { ascending: false }).limit(10);
+  if (error || !data) return [];
+  return data.map((row, index) => ({ rank: index + 1, id: row.id, address: row.wallet_address, username: row.username || "Unknown", trustScore: row.trust_score || 0, isOptedIn: row.is_opted_in || false, identityState: row.identity_state || "ACTIVE" }));
 }
 
-/**
- * Fetch top 20 projects from squad_projects sorted by last_valid_mc DESC.
- * Pure DB read — no live Helius/DexScreener calls.
- */
 export async function getPowerSquads(): Promise<PowerSquadProject[]> {
-  const { data, error } = await supabase
-    .from("squad_projects")
-    .select("*")
-    .order("last_valid_mc", { ascending: false, nullsFirst: false })
-    .limit(20);
+  const { data, error } = await supabase.from("squad_projects").select("*").order("last_valid_mc", { ascending: false, nullsFirst: false }).limit(20);
+  if (error || !data) return [];
 
-  if (error || !data) {
-    // eslint-disable-next-line no-console
-    console.error("[getPowerSquads] Supabase error:", error);
-    return [];
-  }
-
-  // Batch-fetch member counts for all projects (1 extra query)
   const projectIds = data.map((row) => row.id as string);
   const memberCountMap = await getSquadMemberCounts(projectIds);
+  const founders = Array.from(new Set(data.map(row => row.claimed_by as string).filter(Boolean)));
+  const founderMap = new Map();
+
+  if (founders.length > 0) {
+    const { data: usersData } = await supabase.from("users").select("wallet_address, trust_score, identity_state").in("wallet_address", founders);
+    if (usersData) {
+      usersData.forEach(u => {
+        const isExiled = u.identity_state === "EXILED";
+        let mappedTier = "Newbie";
+        if (!isExiled) {
+          if (u.trust_score >= 900) mappedTier = "Legendary";
+          else if (u.trust_score >= 700) mappedTier = "Elite";
+          else if (u.trust_score >= 400) mappedTier = "Proven";
+          else if (u.trust_score >= 200) mappedTier = "Contributor";
+        }
+        founderMap.set(u.wallet_address, { score: u.trust_score ?? 0, tier: isExiled ? "EXILED" : mappedTier, status: isExiled ? "EXILED" : "ACTIVE" });
+      });
+    }
+  }
 
   return data.map((row, index) => {
-    // SECURITY (VULN-08): Mask founder wallet address — mirrors getEliteAgents masking.
     const founderAddr = row.claimed_by as string;
-    const maskedFounder =
-      founderAddr && founderAddr.length > 10
-        ? `${founderAddr.slice(0, 4)}...${founderAddr.slice(-4)}`
-        : founderAddr;
-
+    const maskedFounder = founderAddr && founderAddr.length > 10 ? `${founderAddr.slice(0, 4)}...${founderAddr.slice(-4)}` : founderAddr;
     const projectId = row.id as string;
+    const devStats = founderMap.get(founderAddr) || { score: 0, tier: "Newbie", status: "ACTIVE" };
+
     return {
-      rank: index + 1,
-      id: projectId,
-      name: row.name as string,
-      symbol: (row.project_symbol as string) || (row.symbol as string) || "",
-      mint_address: row.mint_address as string,
-      claimed_by: maskedFounder,
-      claimed_by_full: founderAddr,
-      status: (row.status as string) || "active",
-      claim_tier: (row.claim_tier as string) || "community",
-      is_renounced: (row.is_renounced as boolean) ?? false,
-      market_cap: row.market_cap as number | null,
-      fdv: row.fdv as number | null,
-      liquidity_usd: row.liquidity_usd as number | null,
-      volume_24h: row.volume_24h as number | null,
-      last_valid_mc: row.last_valid_mc as number | null,
-      last_mc_update: row.last_mc_update as string | null,
-      created_at: row.created_at as string,
-      memberCount: memberCountMap.get(projectId) ?? 0,
+      rank: index + 1, id: projectId, name: row.name as string, symbol: (row.project_symbol as string) || (row.symbol as string) || "", mint_address: row.mint_address as string, claimed_by: maskedFounder, claimed_by_full: founderAddr, status: (row.status as string) || "active", claim_tier: (row.claim_tier as string) || "community", is_renounced: (row.is_renounced as boolean) ?? false, market_cap: row.market_cap as number | null, fdv: row.fdv as number | null, liquidity_usd: row.liquidity_usd as number | null, volume_24h: row.volume_24h as number | null, last_valid_mc: row.last_valid_mc as number | null, last_mc_update: row.last_mc_update as string | null, created_at: row.created_at as string, memberCount: memberCountMap.get(projectId) ?? 0,
+      dev_tier: devStats.tier, dev_trust_score: devStats.score, dev_status: devStats.status, project_trust_score: (row.project_trust_score as number) || 0, project_risk_band: (row.project_risk_band as any) || "EXTREME",
+      squad_avg_trust_score: memberCountMap.get(projectId) ? Math.max(0, Math.round(((row.project_trust_score as number) - (devStats.score * 0.6)) / 0.4)) : 0,
     };
   });
 }
 
 // ──────────────────────────────────────────────────────────────
-// Arena Manual Sync Trigger — Admin Force Refresh
+// Arena Manual Sync Trigger
 // ──────────────────────────────────────────────────────────────
-
-type SyncResult = {
-  success: boolean;
-  processed: number;
-  updated: number;
-  ghosted: number;
-  skipped: number;
-  error?: string;
-};
-
-/**
- * Manual trigger for the Arena Market Cap sync.
- * Allows admins to force a refresh from the UI without waiting for cron.
- * Revalidates the leaderboard path after sync completes.
- *
- * SECURITY (VULN-02): Caller must provide their wallet address.
- * Server validates it against ADMIN_WALLET env var before executing sync.
- */
-export async function triggerManualSync(
-  callerWallet: string,
-  signedMessage: { message: string; signature: string },
-): Promise<SyncResult> {
-  // ── Auth Guard: Admin-only action ──
+export async function triggerManualSync(callerWallet: string, signedMessage: { message: string; signature: string }) {
   const adminWallet = process.env.ADMIN_WALLET;
+  if (!adminWallet) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Server misconfiguration: admin wallet not set." };
+  if (!callerWallet || callerWallet.trim().toLowerCase() !== adminWallet.trim().toLowerCase()) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Unauthorized. Admin access required." };
 
-  if (!adminWallet) {
-    // eslint-disable-next-line no-console
-    console.error("[triggerManualSync] ADMIN_WALLET env var is not configured.");
-    return {
-      success: false,
-      processed: 0,
-      updated: 0,
-      ghosted: 0,
-      skipped: 0,
-      error: "Server misconfiguration: admin wallet not set.",
-    };
-  }
-
-  if (!callerWallet || callerWallet.trim().toLowerCase() !== adminWallet.trim().toLowerCase()) {
-    // eslint-disable-next-line no-console
-    console.warn(`[triggerManualSync] Unauthorized attempt from: ${callerWallet?.slice(0, 8) ?? "unknown"}`);
-    return {
-      success: false,
-      processed: 0,
-      updated: 0,
-      ghosted: 0,
-      skipped: 0,
-      error: "Unauthorized. Admin access required.",
-    };
-  }
-
-  // SECURITY (VULN-04): Knowing the admin address is not enough — ownership must be
-  // cryptographically proven. Rate-limit + signed message + timestamp check.
-  const syncRateCheck = await checkRateLimit(
-    `admin_sync:${callerWallet.trim()}`,
-    RATE_LIMITS.MANUAL_SYNC.maxRequests,
-    RATE_LIMITS.MANUAL_SYNC.windowMs,
-  );
-  if (!syncRateCheck.allowed) {
-    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Too many sync attempts. Please wait." };
-  }
-  if (!validateMessageTimestamp(signedMessage.message)) {
-    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature expired. Please sign again." };
-  }
-  const isSyncSigValid = await verifyWalletSignature(
-    callerWallet.trim(),
-    signedMessage.message,
-    signedMessage.signature,
-  );
-  if (!isSyncSigValid) {
-    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature verification failed." };
-  }
+  const syncRateCheck = await checkRateLimit(`admin_sync:${callerWallet.trim()}`, RATE_LIMITS.MANUAL_SYNC.maxRequests, RATE_LIMITS.MANUAL_SYNC.windowMs);
+  if (!syncRateCheck.allowed) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Too many sync attempts. Please wait." };
+  if (!validateMessageTimestamp(signedMessage.message)) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature expired. Please sign again." };
+  
+  // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY)
+  const isSyncSigValid = await verifyLegacySignature(callerWallet.trim(), signedMessage.message, signedMessage.signature);
+  if (!isSyncSigValid) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature verification failed." };
 
   try {
     const result = await syncArenaMarketCaps();
-
-    // Revalidate all cached pages that display arena data
-    // "/" is the main dashboard where ArenaLeaderboard renders
-    revalidatePath("/");
-    revalidatePath("/arena");
-    revalidatePath("/leaderboard");
-
+    revalidatePath("/"); revalidatePath("/arena"); revalidatePath("/leaderboard");
     return result;
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(
-      "[triggerManualSync] Exception:",
-      error instanceof Error ? error.message : String(error),
-    );
-    return {
-      success: false,
-      processed: 0,
-      updated: 0,
-      ghosted: 0,
-      skipped: 0,
-      error: "Manual sync failed unexpectedly",
+    return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Manual sync failed unexpectedly" };
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 🔥 PUMPMATCH PROTOCOL: ACTION HANDLERS (V1.5 DAO-Ready) 🔥
+// ──────────────────────────────────────────────────────────────
+
+export async function addSquadMemberAction(payload: { projectId: string; targetWallet: string; founderWallet: string; role: string; nonce: string; timestamp: number; signature: string; }) {
+  try {
+    const founder = new PublicKey(payload.founderWallet.trim()).toBase58();
+    const target = new PublicKey(payload.targetWallet.trim()).toBase58();
+
+    const expectedPayload: PumpMatchPayload = {
+      action: 'invite', chain: 'solana-mainnet', domain: 'pumpmatch-governance', env: ENV,
+      nonce: payload.nonce, project: payload.projectId, role: payload.role, target: target, timestamp: payload.timestamp, v: 1
     };
+
+    const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(founder, payload.signature, expectedPayload);
+    if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature failed." };
+
+    const { data, error } = await supabase.rpc('process_squad_transition', {
+      p_project_id: payload.projectId, p_actor: derivedActor, p_target: target, p_action: 'invite', p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err: any) {
+    console.error("[Protocol Error - addSquadMemberAction]", err);
+    return { success: false, message: "Protocol execution failed." };
   }
 }
 
-// ──────────────────────────────────────────────────────────────
-// Squad Member Management Actions
-// ──────────────────────────────────────────────────────────────
-
-/**
- * Founder adds a member to their squad project.
- * Only the project's claimed_by wallet can call this.
- */
-export async function addSquadMemberAction(
-  projectId: string,
-  memberWallet: string,
-  founderWallet: string,
-  role: Role | undefined,
-  signedMessage: { message: string; signature: string },
-): Promise<{ success: boolean; message: string; alreadyMember?: boolean }> {
-  "use server";
-
+export async function joinSquadAction(payload: { projectId: string; walletAddress: string; role: string; nonce: string; timestamp: number; signature: string; }) {
   try {
-    if (!validateMessageTimestamp(signedMessage.message)) {
-      return { success: false, message: "Signature expired. Please try again." };
-    }
-    const isValidSig = await verifyWalletSignature(founderWallet, signedMessage.message, signedMessage.signature);
-    if (!isValidSig) return { success: false, message: "Signature verification failed." };
+    const applicant = new PublicKey(payload.walletAddress.trim()).toBase58();
 
-    // Verify founder owns this project
-    const { data: project, error: projectError } = await supabase
-      .from('squad_projects')
-      .select('id, claimed_by, status')
-      .eq('id', projectId)
-      .single();
+    const expectedPayload: PumpMatchPayload = {
+      action: 'apply', chain: 'solana-mainnet', domain: 'pumpmatch-governance', env: ENV,
+      nonce: payload.nonce, project: payload.projectId, role: payload.role, target: applicant, timestamp: payload.timestamp, v: 1
+    };
 
-    if (projectError || !project) return { success: false, message: "Project not found." };
-    if ((project.claimed_by as string) !== founderWallet) {
-      return { success: false, message: "Only the project founder can add members." };
-    }
-    if ((project.status as string) === 'rugged') {
-      return { success: false, message: "Cannot add members to a rugged project." };
-    }
+    const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(applicant, payload.signature, expectedPayload);
+    if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature failed." };
 
-    // Target must be an opted-in network member
-    const memberProfile = await getUserProfile(memberWallet);
-    if (!memberProfile?.isOptedIn) {
-      return { success: false, message: "Target wallet is not a network member." };
-    }
+    const { data, error } = await supabase.rpc('process_squad_transition', {
+      p_project_id: payload.projectId, p_actor: derivedActor, p_target: applicant, p_action: 'apply', p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
+    });
 
-    const result = await addSquadMember(projectId, memberWallet, role, 'active');
-    if (result.alreadyMember) {
-      return { success: true, message: "Already a squad member.", alreadyMember: true };
-    }
-    if (!result.success) {
-      return { success: false, message: "Failed to add member." };
-    }
-
-    return { success: true, message: `${memberProfile.username} added to squad!` };
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[addSquadMemberAction] Exception:', error);
-    return { success: false, message: "Failed to add member. Please try again." };
+    if (error) throw error;
+    return data;
+  } catch (err: any) {
+    console.error("[Protocol Error - joinSquadAction]", err);
+    return { success: false, message: "Protocol execution failed." };
   }
 }
 
-/**
- * A network member requests to join a squad (pending status).
- * The founder can see and accept pending members.
- */
-export async function joinSquadAction(
-  projectId: string,
-  memberWallet: string,
-  role: Role | undefined,
-  signedMessage: { message: string; signature: string },
-): Promise<{ success: boolean; message: string }> {
-  "use server";
-
+export async function executeSquadTransitionAction(payload: {
+  projectId: string; actorWallet: string; targetWallet: string; actionType: 'approve_app' | 'reject_app' | 'accept_invite' | 'reject_invite' | 'revoke_invite' | 'kick' | 'leave'; role: string; nonce: string; timestamp: number; signature: string;
+}) {
   try {
-    if (!validateMessageTimestamp(signedMessage.message)) {
-      return { success: false, message: "Signature expired. Please try again." };
-    }
-    const isValidSig = await verifyWalletSignature(memberWallet, signedMessage.message, signedMessage.signature);
-    if (!isValidSig) return { success: false, message: "Signature verification failed." };
+    const actor = new PublicKey(payload.actorWallet.trim()).toBase58();
+    const target = new PublicKey(payload.targetWallet.trim()).toBase58();
 
-    const memberProfile = await getUserProfile(memberWallet);
-    if (!memberProfile?.isOptedIn) {
-      return { success: false, message: "You must join the network before applying to a squad." };
-    }
+    const expectedPayload: PumpMatchPayload = {
+      action: payload.actionType, chain: 'solana-mainnet', domain: 'pumpmatch-governance', env: ENV,
+      nonce: payload.nonce, project: payload.projectId, role: payload.role, target: target, timestamp: payload.timestamp, v: 1
+    };
 
-    const { data: project, error: projectError } = await supabase
-      .from('squad_projects')
-      .select('id, status, name')
-      .eq('id', projectId)
-      .single();
+    const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(actor, payload.signature, expectedPayload);
+    if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature verification failed." };
 
-    if (projectError || !project) return { success: false, message: "Project not found." };
-    if ((project.status as string) === 'rugged') {
-      return { success: false, message: "Cannot join a rugged project." };
-    }
+    const { data, error } = await supabase.rpc('process_squad_transition', {
+      p_project_id: payload.projectId, p_actor: derivedActor, p_target: target, p_action: payload.actionType, p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
+    });
 
-    const result = await addSquadMember(projectId, memberWallet, role, 'pending');
-    if (result.alreadyMember) {
-      return { success: true, message: "Application already submitted." };
-    }
-    if (!result.success) {
-      return { success: false, message: "Failed to submit application." };
-    }
-
-    return { success: true, message: `Applied to join ${project.name as string}!` };
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[joinSquadAction] Exception:', error);
-    return { success: false, message: "Failed to apply. Please try again." };
+    if (error) throw error;
+    return data;
+  } catch (err: any) {
+    console.error("[Protocol Error - executeSquadTransitionAction]", err);
+    return { success: false, message: "Transition failed." };
   }
 }
 
-/** Get all members of a squad project (public read). */
-export async function getSquadMembersAction(projectId: string): Promise<SquadMember[]> {
-  "use server";
+// app/actions/arena.ts dosyasının en altına eklenecek
+export async function getSquadMembersAction(projectId: string) {
   try {
-    return await getSquadMembers(projectId);
+    const { data, error } = await supabase
+      .from('squad_members')
+      .select('*')
+      .eq('project_id', projectId);
+      
+    if (error) throw error;
+    return { success: true, data };
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[getSquadMembersAction] Exception:', error);
-    return [];
-  }
-}
-
-/** Founder removes a member OR a member leaves a squad. */
-export async function removeSquadMemberAction(
-  projectId: string,
-  memberWallet: string,
-  callerWallet: string,
-  signedMessage: { message: string; signature: string },
-): Promise<{ success: boolean; message: string }> {
-  "use server";
-
-  try {
-    if (!validateMessageTimestamp(signedMessage.message)) {
-      return { success: false, message: "Signature expired. Please try again." };
-    }
-    const isValidSig = await verifyWalletSignature(callerWallet, signedMessage.message, signedMessage.signature);
-    if (!isValidSig) return { success: false, message: "Signature verification failed." };
-
-    // Caller must be either the member themselves or the project founder
-    if (callerWallet !== memberWallet) {
-      const { data: project } = await supabase
-        .from('squad_projects')
-        .select('claimed_by')
-        .eq('id', projectId)
-        .single();
-
-      if (!project || (project.claimed_by as string) !== callerWallet) {
-        return { success: false, message: "Only the founder or the member themselves can remove a member." };
-      }
-    }
-
-    const ok = await removeSquadMember(projectId, memberWallet);
-    return ok
-      ? { success: true, message: "Member removed from squad." }
-      : { success: false, message: "Failed to remove member." };
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[removeSquadMemberAction] Exception:', error);
-    return { success: false, message: "Failed. Please try again." };
+    console.error("Error fetching squad members:", error);
+    return { success: false, data: [] };
   }
 }
