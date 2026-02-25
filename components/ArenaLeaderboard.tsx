@@ -173,14 +173,14 @@ export function ArenaLeaderboard({
               </motion.button>
             )}
 
-            {/* Admin Sync — only rendered when a wallet is connected */}
+            {/* Sync — any connected wallet can refresh market data */}
             {walletAddress && (
               <button
                 type="button"
                 onClick={handleManualSync}
                 disabled={isSyncing}
                 className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-all disabled:opacity-50"
-                title="Sync Arena Data (Admin)"
+                title="Sync Arena Data"
               >
                 {isSyncing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

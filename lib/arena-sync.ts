@@ -1,6 +1,6 @@
 import "server-only";
 
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import type { ArenaProjectStatus, DexScreenerPair } from "@/types";
 
 // ──────────────────────────────────────────────────────────────
@@ -25,11 +25,10 @@ const HIGH_LIQUIDITY_THRESHOLD = 5000;
 
 type ProjectRow = {
   id: string;
-  name: string;
+  project_name: string;
   mint_address: string;
   status: string;
   market_cap: number | null;
-  fdv: number | null;
   liquidity_usd: number | null;
   volume_24h: number | null;
   last_valid_mc: number | null;
@@ -39,7 +38,6 @@ type ProjectRow = {
 type ProjectUpdate = {
   id: string;
   market_cap: number | null;
-  fdv: number | null;
   liquidity_usd: number | null;
   volume_24h: number | null;
   last_valid_mc: number | null;
@@ -161,7 +159,7 @@ export async function syncArenaMarketCaps(): Promise<{
     const { data: projects, error: fetchError } = await supabase
       .from("squad_projects")
       .select(
-        "id, name, mint_address, status, market_cap, fdv, liquidity_usd, volume_24h, last_valid_mc, last_mc_update",
+        "id, project_name, mint_address, status, market_cap, liquidity_usd, volume_24h, last_valid_mc, last_mc_update",
       );
 
     if (fetchError || !projects) {
@@ -254,7 +252,6 @@ export async function syncArenaMarketCaps(): Promise<{
         updates.push({
           id: project.id,
           market_cap: rawMarketCap > 0 ? rawMarketCap : null,
-          fdv: rawFdv > 0 ? rawFdv : null,
           liquidity_usd: liquidityUsd > 0 ? liquidityUsd : null,
           volume_24h: volume24h > 0 ? volume24h : null,
           last_valid_mc: selectedMc,
@@ -292,6 +289,7 @@ export async function syncArenaMarketCaps(): Promise<{
     // ── Release Lock (always, even on error) ──
     const { error: releaseError } = await supabase.rpc("release_lock", {
       p_key: "arena_sync",
+      p_worker_id: "worker_1",
     });
     if (releaseError) {
       // eslint-disable-next-line no-console

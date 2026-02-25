@@ -111,15 +111,15 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
     return { success: false, errorCode: "AUTHORITY_MISMATCH", message: "Ownership Verification Failed. You must be the active Update Authority." };
   }
 
-  const { data: existingProject } = await supabase.from("squad_projects").select("id, claimed_by").eq("mint_address", normalizedMint).maybeSingle();
+  const { data: existingProject } = await supabase.from("squad_projects").select("id, created_by").eq("mint_address", normalizedMint).maybeSingle();
 
   if (existingProject) {
-    if ((existingProject.claimed_by as string).toLowerCase() === normalizedWallet) return { success: true, message: "Welcome back, Founder.", projectId: existingProject.id as string };
+    if ((existingProject.created_by as string).toLowerCase() === normalizedWallet) return { success: true, message: "Welcome back, Founder.", projectId: existingProject.id as string };
     return { success: false, errorCode: "ALREADY_CLAIMED", message: "Project already claimed by another founder." };
   }
 
   const { data, error } = await supabaseAdmin.from("squad_projects").insert({
-      name: payload.name.trim(), mint_address: normalizedMint, claimed_by: normalizedWallet, symbol, project_symbol: symbol, status: "active", claim_tier: "founder", is_renounced: false, update_authority: extractedAuthority.toLowerCase(), market_cap: null, fdv: null, liquidity_usd: null, volume_24h: null, last_valid_mc: null, last_mc_update: null,
+      project_name: payload.name.trim(), mint_address: normalizedMint, created_by: normalizedWallet, project_symbol: symbol, status: "active", claim_tier: "founder", is_renounced: false, update_authority: extractedAuthority.toLowerCase(), market_cap: null, liquidity_usd: null, volume_24h: null, last_valid_mc: null, last_mc_update: null,
   }).select("id").single();
 
   if (error) {
@@ -211,7 +211,7 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
   const memberCountMap = await getSquadMemberCounts(projectIds);
 
   const founders = Array.from(
-    new Set(data.map((row) => row.claimed_by as string).filter(Boolean)),
+    new Set(data.map((row) => row.created_by as string).filter(Boolean)),
   );
   const founderMap = new Map<string, FounderStats>();
 
@@ -241,7 +241,7 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
   }
 
   return data.map((row, index) => {
-    const founderAddr = row.claimed_by as string;
+    const founderAddr = row.created_by as string;
     const maskedFounder =
       founderAddr && founderAddr.length > 10
         ? `${founderAddr.slice(0, 4)}...${founderAddr.slice(-4)}`
@@ -266,7 +266,7 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
       claim_tier: (row.claim_tier as string) || "community",
       is_renounced: (row.is_renounced as boolean) ?? false,
       market_cap: row.market_cap as number | null,
-      fdv: row.fdv as number | null,
+      fdv: null,
       liquidity_usd: row.liquidity_usd as number | null,
       volume_24h: row.volume_24h as number | null,
       last_valid_mc: row.last_valid_mc as number | null,
@@ -291,21 +291,14 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
 // Arena Manual Sync Trigger
 // ──────────────────────────────────────────────────────────────
 export async function triggerManualSync(callerWallet: string, signedMessage: { message: string; signature: string }) {
-  const adminWallet = process.env.ADMIN_WALLET;
-  if (!adminWallet) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Server misconfiguration: admin wallet not set." };
-
-  // Rate limit and timestamp check before any crypto work
-  const syncRateCheck = await checkRateLimit(`admin_sync:${callerWallet.trim()}`, RATE_LIMITS.MANUAL_SYNC.maxRequests, RATE_LIMITS.MANUAL_SYNC.windowMs);
+  // Rate limit per wallet — prevents sync spam (5 per 15 min)
+  const syncRateCheck = await checkRateLimit(`sync:${callerWallet.trim()}`, RATE_LIMITS.MANUAL_SYNC.maxRequests, RATE_LIMITS.MANUAL_SYNC.windowMs);
   if (!syncRateCheck.allowed) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Too many sync attempts. Please wait." };
   if (!validateMessageTimestamp(signedMessage.message)) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature expired. Please sign again." };
 
-  // Verify signature FIRST — cryptographically proves caller owns callerWallet
-  // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY)
+  // Verify signature — proves caller owns the wallet
   const isSyncSigValid = await verifyLegacySignature(callerWallet.trim(), signedMessage.message, signedMessage.signature);
   if (!isSyncSigValid) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Signature verification failed." };
-
-  // Admin check AFTER sig verification — now we know the caller truly owns callerWallet
-  if (!callerWallet || callerWallet.trim().toLowerCase() !== adminWallet.trim().toLowerCase()) return { success: false, processed: 0, updated: 0, ghosted: 0, skipped: 0, error: "Unauthorized. Admin access required." };
 
   try {
     const result = await syncArenaMarketCaps();

@@ -113,12 +113,19 @@ export async function checkRateLimit(
   }
 
   const limiter = getRatelimit(r, maxRequests, windowMs);
-  const result = await limiter.limit(identifier);
 
-  if (result.success) {
+  try {
+    const result = await limiter.limit(identifier);
+    if (result.success) return { allowed: true };
+    const retryAfterMs = Math.max(0, result.reset - Date.now());
+    return { allowed: false, retryAfterMs };
+  } catch (err) {
+    // Redis auth failure or network error — treat same as "not configured"
+    // eslint-disable-next-line no-console
+    console.error('[rate-limiter] Redis error:', err instanceof Error ? err.message : String(err));
+    if (process.env.NODE_ENV === 'production') {
+      return { allowed: false, retryAfterMs: 60_000 };
+    }
     return { allowed: true };
   }
-
-  const retryAfterMs = Math.max(0, result.reset - Date.now());
-  return { allowed: false, retryAfterMs };
 }
