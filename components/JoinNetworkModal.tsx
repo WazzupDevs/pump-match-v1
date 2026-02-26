@@ -82,6 +82,27 @@ export function JoinNetworkModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Mobile keyboard fix: constrain modal height to visual viewport so footer stays above keyboard (iOS Safari / Android Chrome)
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isOpen || typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    const setModalHeight = () => {
+      const h = vv?.height ?? window.innerHeight;
+      const isMobile = window.innerWidth < 640;
+      setViewportHeight(isMobile ? h : Math.min(h, window.innerHeight * 0.9));
+    };
+    setModalHeight();
+    vv?.addEventListener("resize", setModalHeight);
+    vv?.addEventListener("scroll", setModalHeight);
+    return () => {
+      vv?.removeEventListener("resize", setModalHeight);
+      vv?.removeEventListener("scroll", setModalHeight);
+      setViewportHeight(null);
+    };
+  }, [isOpen]);
 
   // Sync selection when modal opens with different currentIntent
   useEffect(() => {
@@ -226,12 +247,16 @@ export function JoinNetworkModal({
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-label={isEditing ? "Update network intent" : "Join network"}
     >
-      <div className="relative w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden rounded-2xl border border-emerald-500/30 bg-zinc-900/90 backdrop-blur-xl shadow-[0_0_80px_rgba(16,185,129,0.15)] animate-in zoom-in-95 fade-in duration-200">
+      <div
+        ref={modalRef}
+        style={viewportHeight != null ? { height: `${viewportHeight}px` } : undefined}
+        className="relative w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl border border-emerald-500/30 bg-zinc-900/90 backdrop-blur-xl shadow-[0_0_80px_rgba(16,185,129,0.15)] animate-in zoom-in-95 fade-in duration-200"
+      >
         {/* Sticky header: Close button + Title + Description */}
         <div className="sticky top-0 z-10 flex-shrink-0 border-b border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm">
           <button
@@ -256,7 +281,7 @@ export function JoinNetworkModal({
 
         {/* Scrollable body: overflow + premium scrollbar + bottom padding */}
         <div
-          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-12 pt-4 px-6 md:px-8 [scrollbar-width:thin] [scrollbar-color:rgb(63_63_70)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-6 pt-4 px-6 md:px-8 [scrollbar-width:thin] [scrollbar-color:rgb(63_63_70)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
         >
           {/* Username field */}
           <div className="mt-5">
@@ -398,12 +423,15 @@ export function JoinNetworkModal({
             <p className="mt-3 text-sm text-rose-400">{submitError}</p>
           )}
 
-          {/* Footer buttons */}
-          <div className="mt-6 flex items-center gap-3">
+        </div>
+
+        {/* Sticky footer: always visible above keyboard — NOT inside scroll */}
+        <div className="flex-shrink-0 border-t border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm px-6 md:px-8 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-slate-200 hover:border-zinc-600 transition-colors"
+              className="flex-1 rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-slate-200 hover:border-zinc-600 transition-colors min-h-[44px]"
             >
               Cancel
             </button>
@@ -411,7 +439,7 @@ export function JoinNetworkModal({
               type="button"
               onClick={handleConfirm}
               disabled={!canSubmit}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 text-sm font-semibold text-black hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 shadow-lg shadow-emerald-500/20"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-sm font-semibold text-black hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 shadow-lg shadow-emerald-500/20"
             >
               {isSubmitting && (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -423,7 +451,6 @@ export function JoinNetworkModal({
                   : "Join Network"}
             </button>
           </div>
-        </div>
         </div>
       </div>
     </div>
