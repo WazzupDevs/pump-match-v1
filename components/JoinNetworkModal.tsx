@@ -41,6 +41,8 @@ interface JoinNetworkModalProps {
   walletAnalysis: WalletAnalysis;
   isOpen: boolean;
   onClose: () => void;
+  /** Called when user dismisses without joining (X or Cancel). Use to persist "skip" in localStorage. */
+  onDismissWithoutJoin?: () => void;
   currentIntent?: string;
   currentUsername?: string;
   currentTags?: string[];
@@ -54,6 +56,7 @@ export function JoinNetworkModal({
   walletAnalysis,
   isOpen,
   onClose,
+  onDismissWithoutJoin,
   currentIntent,
   currentUsername,
   currentTags,
@@ -261,7 +264,10 @@ export function JoinNetworkModal({
         <div className="sticky top-0 z-10 flex-shrink-0 border-b border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm">
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              onDismissWithoutJoin?.();
+              onClose();
+            }}
             className="absolute right-4 top-4 rounded-full p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
             aria-label="Close"
           >
@@ -430,7 +436,10 @@ export function JoinNetworkModal({
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                onDismissWithoutJoin?.();
+                onClose();
+              }}
               className="flex-1 rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-slate-200 hover:border-zinc-600 transition-colors min-h-[44px]"
             >
               Cancel

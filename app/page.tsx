@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import {
   Line,
   LineChart,
@@ -119,6 +119,17 @@ function formatWalletAge(days: number | undefined): string {
   return `${(days / 365).toFixed(1)} years`;
 }
 
+// ──────────────────────────────────────────────────────────────
+// Join Network modal: persist "Skip / Cancel" per wallet so we don't auto-open again
+// ──────────────────────────────────────────────────────────────
+const getSkipJoinKey = (walletAddress: string) =>
+  `pumpmatch_skip_join_${walletAddress}`;
+
+function getSkipJoinFlag(walletAddress: string): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(getSkipJoinKey(walletAddress)) === "true";
+}
+
 export default function Home() {
   const { publicKey, connected, signMessage } = useWallet();
   const [query, setQuery] = useState("");
@@ -132,6 +143,7 @@ export default function Home() {
   const [userIntent, setUserIntent] = useState<UserIntent | null>(null);
   // Opt-In Network Architecture - Join Network Modal State
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const hasAutoOpenedJoinModalRef = useRef(false);
   // God Mode Discovery - Filter & Search
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<NetworkAgent[] | null>(null);
@@ -149,6 +161,21 @@ export default function Home() {
     const timer = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // Reset auto-open ref when wallet changes so a new wallet gets one auto-open chance
+  useEffect(() => {
+    hasAutoOpenedJoinModalRef.current = false;
+  }, [publicKey?.toBase58()]);
+
+  // Auto-open Join modal when we have analysis + not registered, unless user previously skipped (per wallet)
+  useEffect(() => {
+    if (!publicKey || !analysis || analysis.isRegistered) return;
+    const addr = publicKey.toBase58();
+    if (getSkipJoinFlag(addr)) return;
+    if (hasAutoOpenedJoinModalRef.current) return;
+    hasAutoOpenedJoinModalRef.current = true;
+    setIsJoinModalOpen(true);
+  }, [analysis?.address, analysis?.isRegistered, publicKey?.toBase58()]);
 
   // ── Endorsement: Sign + call endorseUserAction ──
   const handleEndorse = useCallback(
@@ -219,7 +246,10 @@ export default function Home() {
             const walletAnalysis = response.walletAnalysis;
             
             if (!userIntent) {
-              setShowIntentModal(true);
+              const skipKey = `pumpmatch_skip_intent_${walletAddress}`;
+              if (typeof window !== "undefined" && localStorage.getItem(skipKey) !== "true") {
+                setShowIntentModal(true);
+              }
             }
             
             setAnalysis(walletAnalysis);
@@ -294,9 +324,13 @@ export default function Home() {
 
       const walletAnalysis = response.walletAnalysis;
       
-      // v2: Intent Layer - Show modal if intent not selected after analysis
+      // v2: Intent Layer - Show modal if intent not selected after analysis (unless user skipped for this wallet)
       if (!userIntent) {
-        setShowIntentModal(true);
+        const walletAddress = publicKey?.toBase58();
+        const skipKey = walletAddress ? `pumpmatch_skip_intent_${walletAddress}` : null;
+        if (!skipKey || (typeof window !== "undefined" && localStorage.getItem(skipKey) !== "true")) {
+          setShowIntentModal(true);
+        }
       }
       
       setAnalysis(walletAnalysis);
@@ -1142,6 +1176,14 @@ export default function Home() {
               </div>
               <button
                 onClick={() => {
+                  const walletAddress = publicKey?.toBase58();
+                  if (walletAddress) {
+                    try {
+                      localStorage.setItem(`pumpmatch_skip_intent_${walletAddress}`, "true");
+                    } catch {
+                      // ignore localStorage errors (private mode, etc.)
+                    }
+                  }
                   setShowIntentModal(false);
                   if (query.trim() && !userIntent) {
                     handleAnalyze();
@@ -1161,6 +1203,14 @@ export default function Home() {
             walletAnalysis={analysis}
             isOpen={isJoinModalOpen}
             onClose={() => setIsJoinModalOpen(false)}
+            onDismissWithoutJoin={() => {
+              try {
+                localStorage.setItem(getSkipJoinKey(analysis.address), "true");
+              } catch {
+                // ignore localStorage errors (private mode, etc.)
+              }
+              setIsJoinModalOpen(false);
+            }}
             currentIntent={analysis.intent?.replace(/_/g, " ")}
             currentUsername={userProfile?.username}
             currentTags={userProfile?.tags}

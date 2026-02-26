@@ -14,8 +14,33 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pump Match | On-Chain Squad Builder",
-  description: "Find verified devs, whales, and early adopters in the Pump.fun ecosystem.",
+  title: "Pump Match | The On-Chain Matchmaking Engine",
+  description:
+    "Find your perfect Web3 squad on Solana. Match with verified devs, whales, and early adopters using trust scores and on-chain reputation in the Pump.fun ecosystem.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://pumpmatch.app"),
+  openGraph: {
+    type: "website",
+    url: "/",
+    title: "Pump Match | The On-Chain Matchmaking Engine",
+    description:
+      "Find your perfect Web3 squad on Solana. Match with verified devs, whales, and early adopters using trust scores and on-chain reputation in the Pump.fun ecosystem.",
+    siteName: "Pump Match",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Pump Match — The On-Chain Matchmaking Engine for Solana",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Pump Match | The On-Chain Matchmaking Engine",
+    description:
+      "Find your perfect Web3 squad on Solana. Match with verified devs, whales, and early adopters using trust scores and on-chain reputation in the Pump.fun ecosystem.",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RootLayout({
