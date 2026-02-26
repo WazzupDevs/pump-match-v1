@@ -47,13 +47,13 @@ export function validateMessageTimestamp(message: string): boolean {
 export async function verifyLegacySignature(
   walletAddress: string,
   message: string,
-  signatureBase64: string,
+  signatureBase58: string,
 ): Promise<boolean> {
   try {
     const { subtle } = globalThis.crypto;
     const publicKeyBytes = base58Decode(walletAddress.trim());
     const messageBytes = new TextEncoder().encode(message);
-    const signatureBytes = Uint8Array.from(Buffer.from(signatureBase64, "base64"));
+    const signatureBytes = base58Decode(signatureBase58.trim());
 
     const key = await subtle.importKey(
       "raw", toArrayBuffer(publicKeyBytes), { name: "Ed25519" }, false, ["verify"]

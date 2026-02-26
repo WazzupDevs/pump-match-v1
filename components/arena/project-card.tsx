@@ -238,43 +238,44 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: "easeOut", delay: index * 0.06 }}
-      className={`relative flex flex-col rounded-2xl border p-4 md:p-5 ${getCardBaseStyle()}`}
+      className={`relative flex flex-col rounded-2xl border p-3 sm:p-4 md:p-5 ${getCardBaseStyle()}`}
     >
-      <div className="flex items-center gap-4">
-        <RankIcon rank={rank} isExiled={isExiled} />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+        {/* Identity row: Rank + Ticker + Info */}
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+          <RankIcon rank={rank} isExiled={isExiled} />
 
-        {/* İkon / Ticker */}
-        <div className={`h-11 w-11 rounded-xl flex items-center justify-center font-black shadow-md flex-shrink-0 ${
-            isExiled ? "bg-red-950 border border-red-500/30 text-red-500" : isGhost ? "bg-slate-800/80 border border-slate-700/60 text-slate-600" : rank === 1 ? "bg-gradient-to-br from-yellow-500/25 to-amber-600/15 border border-yellow-500/25 text-yellow-300" : rank <= 3 ? "bg-gradient-to-br from-purple-500/20 to-amber-500/10 border border-purple-500/20 text-purple-200" : "bg-gradient-to-br from-purple-500/15 to-emerald-500/10 border border-purple-500/10 text-purple-300"
-          }`}
-        >
-          {isGhost && !isExiled ? <Ghost className="h-5 w-5" /> : <span className={`text-[11px] leading-none tracking-tight ${isExiled ? "line-through opacity-70" : ""}`}>${(project.symbol || project.name || "??").slice(0, 3)}</span>}
+          <div className={`h-11 w-11 rounded-xl flex items-center justify-center font-black shadow-md flex-shrink-0 ${
+              isExiled ? "bg-red-950 border border-red-500/30 text-red-500" : isGhost ? "bg-slate-800/80 border border-slate-700/60 text-slate-600" : rank === 1 ? "bg-gradient-to-br from-yellow-500/25 to-amber-600/15 border border-yellow-500/25 text-yellow-300" : rank <= 3 ? "bg-gradient-to-br from-purple-500/20 to-amber-500/10 border border-purple-500/20 text-purple-200" : "bg-gradient-to-br from-purple-500/15 to-emerald-500/10 border border-purple-500/10 text-purple-300"
+            }`}
+          >
+            {isGhost && !isExiled ? <Ghost className="h-5 w-5" /> : <span className={`text-[11px] leading-none tracking-tight ${isExiled ? "line-through opacity-70" : ""}`}>${(project.symbol || project.name || "??").slice(0, 3)}</span>}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-sm font-bold truncate max-w-[160px] md:max-w-[220px] ${isExiled ? "text-red-400 line-through" : isGhost ? "text-slate-600" : "text-slate-100"}`}>
+                {project.name}
+              </span>
+              <span className={`text-[10px] font-mono leading-none ${isExiled ? "text-red-500/50" : isGhost ? "text-slate-700" : "text-slate-500"}`}>
+                ${project.symbol || "???"}
+              </span>
+              {isFounder && !isGhost && !isExiled && <FounderBadge />}
+              {project.project_risk_band && !isGhost && (
+                <RiskBandBadge band={project.project_risk_band} score={project.project_trust_score} />
+              )}
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3 mt-1.5 flex-wrap">
+              <span className={`text-[10px] flex items-center gap-1 ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-500"}`}><Droplets className="h-3 w-3" />Liq: {fmtMC(project.liquidity_usd)}</span>
+              <span className={`text-[10px] flex items-center gap-1 ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-500"}`}><TrendingUp className="h-3 w-3" />Vol: {fmtMC(project.volume_24h)}</span>
+              <span className={`text-[10px] ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-600"}`}>{timeAgo(project.last_mc_update)}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Orta Alan */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-sm font-bold truncate max-w-[160px] md:max-w-[220px] ${isExiled ? "text-red-400 line-through" : isGhost ? "text-slate-600" : "text-slate-100"}`}>
-              {project.name}
-            </span>
-            <span className={`text-[10px] font-mono leading-none ${isExiled ? "text-red-500/50" : isGhost ? "text-slate-700" : "text-slate-500"}`}>
-              ${project.symbol || "???"}
-            </span>
-            {isFounder && !isGhost && !isExiled && <FounderBadge />}
-            {project.project_risk_band && !isGhost && (
-              <RiskBandBadge band={project.project_risk_band} score={project.project_trust_score} />
-            )}
-          </div>
-          <div className="flex items-center gap-3 mt-1.5">
-            <span className={`text-[10px] flex items-center gap-1 ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-500"}`}><Droplets className="h-3 w-3" />Liq: {fmtMC(project.liquidity_usd)}</span>
-            <span className={`text-[10px] flex items-center gap-1 ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-500"}`}><TrendingUp className="h-3 w-3" />Vol: {fmtMC(project.volume_24h)}</span>
-            <span className={`text-[10px] ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-600"}`}>{timeAgo(project.last_mc_update)}</span>
-          </div>
-        </div>
-
-        {/* YENİ: Olay Yönlendirmesi Çözüldü */}
-        <div className="text-right flex-shrink-0 pl-2 flex items-center gap-3">
-          <div>
+        {/* Market Cap + Expand */}
+        <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0 sm:pl-2 pt-2 sm:pt-0 border-t border-slate-800/40 sm:border-t-0">
+          <div className="sm:text-right">
             <span className={`text-xl font-black tabular-nums tracking-tight leading-none ${isExiled ? "text-red-500/50 line-through" : isGhost ? "text-slate-700" : project.last_valid_mc && project.last_valid_mc >= 1_000_000 ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.35)]" : project.last_valid_mc && project.last_valid_mc > 0 ? "text-amber-300 drop-shadow-[0_0_6px_rgba(251,191,36,0.2)]" : "text-slate-600"}`}>
               {fmtMC(project.last_valid_mc)}
             </span>
@@ -291,7 +292,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
               }}
               aria-expanded={isExpanded}
               aria-controls={`trust-panel-${project.id}`}
-              className="p-1.5 rounded-full hover:bg-slate-800/80 transition-colors focus:outline-none"
+              className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full hover:bg-slate-800/80 transition-colors focus:outline-none"
             >
               <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
                 <ChevronDown className={`h-5 w-5 ${isExpanded ? 'text-emerald-400' : 'text-slate-500'}`} />
@@ -321,7 +322,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
               
               <button
                 onClick={handleOpenManageModal}
-                className={`text-xs px-4 py-2 rounded-lg font-semibold transition-colors ${
+                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg font-semibold transition-colors ${
                   isUserFounder 
                     ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/30"
                     : "bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"

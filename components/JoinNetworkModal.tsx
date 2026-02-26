@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Loader2, Twitter, Send } from "lucide-react";
 import confetti from "canvas-confetti";
 import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
 import { joinNetwork, updateProfileAction } from "@/app/actions/analyzeWallet";
 import type { SocialLinks, WalletAnalysis } from "@/types";
 
@@ -151,8 +152,8 @@ export function JoinNetworkModal({
         const messageText = `${action}\nAddress: ${address}\nTimestamp: ${timestamp}`;
         const messageBytes = new TextEncoder().encode(messageText);
         const signatureBytes = await signMessage(messageBytes);
-        const signatureBase64 = btoa(String.fromCharCode(...signatureBytes));
-        signedMessage = { message: messageText, signature: signatureBase64 };
+        const signatureBase58 = bs58.encode(signatureBytes);
+        signedMessage = { message: messageText, signature: signatureBase58 };
       } else {
         console.warn("[JoinNetworkModal] signMessage not available on this wallet.");
       }

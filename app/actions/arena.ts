@@ -61,7 +61,8 @@ function isAuthorityRenounced(authority: string | null): boolean {
 // Arena Financial Snapshot Engine — Secure Claim Action
 // ──────────────────────────────────────────────────────────────
 export async function claimProjectAction(payload: { name: string; mint: string; walletAddress: string; nonce: string; timestamp: number; signature: string; }): Promise<ClaimResult> {
-  const normalizedWallet = payload.walletAddress.trim().toLowerCase();
+  const canonicalWallet = payload.walletAddress.trim();
+  const normalizedWallet = canonicalWallet.toLowerCase();
   const normalizedMint = payload.mint.trim();
 
   const rateKey = `claim:${normalizedWallet}:${normalizedMint}`;
@@ -80,10 +81,9 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
     return { success: false, errorCode: "DB_ERROR", message: "Security engine error." };
   }
 
-  // 🔥 ESKİ SİSTEM DOĞRULAMASI (LEGACY - Sadece Claim için)
-  const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${normalizedWallet}\nTarget: ${normalizedMint}\nNonce: ${payload.nonce}\nTimestamp: ${payload.timestamp}`;
-  const isValidSig = await verifyLegacySignature(normalizedWallet, expectedMessage, payload.signature);
-  // Nonce is already consumed — do not delete it on failure (attacker burned their nonce)
+  // Crypto verification uses canonical (case-preserved) base58 wallet address
+  const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${canonicalWallet}\nTarget: ${normalizedMint}\nNonce: ${payload.nonce}\nTimestamp: ${payload.timestamp}`;
+  const isValidSig = await verifyLegacySignature(canonicalWallet, expectedMessage, payload.signature);
   if (!isValidSig) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Cryptographic verification failed. Context mismatch." };
 
   const userProfile = await getUserProfile(normalizedWallet);

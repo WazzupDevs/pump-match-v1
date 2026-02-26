@@ -72,7 +72,7 @@ export function ClaimProjectModal({
 
     const normalizedName = projectName.trim();
     const normalizedMint = contractAddress.trim();
-    const normalizedWallet = walletAddress.trim().toLowerCase();
+    const normalizedWallet = walletAddress.trim();
 
     if (!normalizedName) {
       setSubmitError("Project name is required.");

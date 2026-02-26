@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { Fish, Dice5, Waves, Bot, History, Sparkles, Lock, X, Users, Wallet, Layers, Activity, AlertTriangle, Scan, Calendar, SlidersHorizontal, Code, Rocket, DollarSign, BadgeCheck, SearchX, ShieldCheck, Zap } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
 import { analyzeWallet, getNetworkMatches, getUserAction, searchNetworkAction, endorseUserAction } from "@/app/actions/analyzeWallet";
 import type { MatchProfile, NetworkAgent, SearchFilters, UserIntent, UserProfile, WalletAnalysis } from "@/types";
 import { MatchCard } from "@/components/match-card";
@@ -160,7 +161,7 @@ export default function Home() {
         const message = `Pump Match Endorse\nTarget: ${targetAddress}\nFrom: ${fromWallet}\nTimestamp: ${Date.now()}`;
         const messageBytes = new TextEncoder().encode(message);
         const signatureBytes = await signMessage(messageBytes);
-        const signature = Buffer.from(signatureBytes).toString("base64");
+        const signature = bs58.encode(signatureBytes);
         const result = await endorseUserAction(fromWallet, targetAddress, { message, signature });
         if (result.success && !result.alreadyEndorsed) {
           setToast(`Endorsed! ${result.message}`);

@@ -10,6 +10,7 @@ import {
   Users,
   ShieldCheck,
 } from "lucide-react";
+import bs58 from "bs58";
 import {
   getEliteAgents,
   getPowerSquads,
@@ -88,11 +89,11 @@ export function ArenaLeaderboard({
       const messageText = `Admin: Sync Arena Data\nAddress: ${walletAddress}\nTimestamp: ${timestamp}`;
       const messageBytes = new TextEncoder().encode(messageText);
       const signatureBytes = await signMessage(messageBytes);
-      const signatureBase64 = btoa(String.fromCharCode(...signatureBytes));
+      const signatureBase58 = bs58.encode(signatureBytes);
 
       const result = await triggerManualSync(walletAddress, {
         message: messageText,
-        signature: signatureBase64,
+        signature: signatureBase58,
       });
       if (result.success) {
         setSyncResult(
@@ -130,12 +131,12 @@ export function ArenaLeaderboard({
         </div>
 
         {/* ── Tab Bar + Actions ── */}
-        <div className="flex items-center justify-between mb-6 gap-3">
-          <div className="flex rounded-xl border border-slate-700/50 bg-slate-900/80 backdrop-blur-sm p-1">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
+          <div className="flex w-full sm:w-auto rounded-xl border border-slate-700/50 bg-slate-900/80 backdrop-blur-sm p-1">
             <button
               type="button"
               onClick={() => setActiveTab("agents")}
-              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 min-h-[44px] flex-1 sm:flex-initial text-sm font-medium transition-all duration-200 ${
                 activeTab === "agents"
                   ? "bg-emerald-500/15 text-emerald-400 shadow-inner shadow-emerald-500/5 border border-emerald-500/25"
                   : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -147,7 +148,7 @@ export function ArenaLeaderboard({
             <button
               type="button"
               onClick={() => setActiveTab("squads")}
-              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 min-h-[44px] flex-1 sm:flex-initial text-sm font-medium transition-all duration-200 ${
                 activeTab === "squads"
                   ? "bg-purple-500/15 text-purple-400 shadow-inner shadow-purple-500/5 border border-purple-500/25"
                   : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -166,7 +167,7 @@ export function ArenaLeaderboard({
                 onClick={() => setIsClaimOpen(true)}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 text-xs font-bold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.03] active:scale-[0.97]"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-xs font-bold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.03] active:scale-[0.97]"
               >
                 <Rocket className="h-3.5 w-3.5" />
                 Claim Project
@@ -179,7 +180,7 @@ export function ArenaLeaderboard({
                 type="button"
                 onClick={handleManualSync}
                 disabled={isSyncing}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-all disabled:opacity-50"
+                className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 min-h-[44px] min-w-[44px] text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-all disabled:opacity-50"
                 title="Sync Arena Data"
               >
                 {isSyncing ? (
@@ -227,7 +228,7 @@ export function ArenaLeaderboard({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-3"
+                className="space-y-2 sm:space-y-3"
               >
                 {agents.length === 0 ? (
                   <div className="rounded-2xl border border-slate-700/40 bg-slate-900/50 p-12 text-center">
@@ -254,7 +255,7 @@ export function ArenaLeaderboard({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-3"
+                className="space-y-2 sm:space-y-3"
               >
                 {projects.length === 0 ? (
                   <div className="rounded-2xl border border-slate-700/40 bg-slate-900/50 p-12 text-center">
@@ -289,7 +290,7 @@ export function ArenaLeaderboard({
                                 founderWallet: project.claimed_by_full ?? project.claimed_by,
                               })
                             }
-                            className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-700/50 bg-slate-900/40 text-slate-500 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all"
+                            className="text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg border border-slate-700/50 bg-slate-900/40 text-slate-500 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all font-medium"
                           >
                             {project.claimed_by_full === walletAddress ? "Manage Squad" : "View Squad"}
                           </button>

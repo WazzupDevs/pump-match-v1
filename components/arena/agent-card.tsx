@@ -92,39 +92,39 @@ export function AgentCard({ agent, index }: AgentCardProps) {
         ease: "easeOut",
         delay: index * 0.06,
       }}
-      className={`relative flex items-center gap-4 rounded-2xl border p-4 md:p-5 transition-all duration-300 ${getCardStyle(agent.rank)}`}
+      className={`relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 rounded-2xl border p-3 sm:p-4 md:p-5 transition-all duration-300 ${getCardStyle(agent.rank)}`}
     >
-      {/* Rank */}
-      <RankIcon rank={agent.rank} />
+      {/* Identity row: Rank + Avatar + Info */}
+      <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+        <RankIcon rank={agent.rank} />
 
-      {/* Avatar */}
-      <div
-        className="h-11 w-11 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg flex-shrink-0 ring-2 ring-white/10"
-        style={{ backgroundColor: generateAvatarColor(agent.username) }}
-      >
-        {agent.username.charAt(0).toUpperCase()}
-      </div>
-
-      {/* Info */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-slate-100 truncate">
-            {agent.username}
-          </span>
-          {agent.identityState === "VERIFIED" && (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold text-amber-400 uppercase tracking-wider">
-              <ShieldCheck className="h-3 w-3" />
-              Verified
-            </span>
-          )}
+        <div
+          className="h-11 w-11 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg flex-shrink-0 ring-2 ring-white/10"
+          style={{ backgroundColor: generateAvatarColor(agent.username) }}
+        >
+          {agent.username.charAt(0).toUpperCase()}
         </div>
-        <span className="text-[11px] text-slate-600 font-mono">
-          {formatAddress(agent.address)}
-        </span>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-slate-100 truncate">
+              {agent.username}
+            </span>
+            {agent.identityState === "VERIFIED" && (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold text-amber-400 uppercase tracking-wider">
+                <ShieldCheck className="h-3 w-3" />
+                Verified
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-slate-600 font-mono">
+            {formatAddress(agent.address)}
+          </span>
+        </div>
       </div>
 
       {/* Trust Score + Network Bonus */}
-      <div className="text-right flex-shrink-0 pl-2">
+      <div className="flex items-center gap-3 sm:block text-left sm:text-right flex-shrink-0 sm:pl-2 pt-2 sm:pt-0 border-t border-slate-800/40 sm:border-t-0">
         <span
           className={`text-2xl font-black tabular-nums tracking-tighter leading-none ${
             displayScore >= 80
@@ -136,12 +136,14 @@ export function AgentCard({ agent, index }: AgentCardProps) {
         >
           {displayScore}
         </span>
-        <p className="text-[8px] uppercase tracking-[0.15em] text-slate-600 mt-0.5">
-          Trust
-        </p>
-        <p className="text-[9px] text-emerald-500 font-bold mt-0.5 animate-pulse">
-          +5 Bonus
-        </p>
+        <div>
+          <p className="text-[8px] uppercase tracking-[0.15em] text-slate-600 sm:mt-0.5">
+            Trust
+          </p>
+          <p className="text-[9px] text-emerald-500 font-bold sm:mt-0.5 animate-pulse">
+            +5 Bonus
+          </p>
+        </div>
       </div>
 
       {/* Rank 1 ambient glow */}
