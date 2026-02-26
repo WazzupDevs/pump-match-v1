@@ -228,7 +228,7 @@ export function ArenaLeaderboard({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-2 sm:space-y-3"
+                className="space-y-4 sm:space-y-3"
               >
                 {agents.length === 0 ? (
                   <div className="rounded-2xl border border-slate-700/40 bg-slate-900/50 p-12 text-center">
@@ -255,7 +255,7 @@ export function ArenaLeaderboard({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-2 sm:space-y-3"
+                className="space-y-4 sm:space-y-3"
               >
                 {projects.length === 0 ? (
                   <div className="rounded-2xl border border-slate-700/40 bg-slate-900/50 p-12 text-center">

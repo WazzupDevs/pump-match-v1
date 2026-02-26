@@ -202,7 +202,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
     if (isGhost && !isExiled) return "grayscale opacity-60 border-slate-800/30 bg-slate-950/30";
     if (isExiled || project.project_risk_band === "RUGGED") return "border-red-500/40 bg-gradient-to-br from-red-950/30 to-slate-950/90 shadow-[0_0_20px_-5px_rgba(239,68,68,0.2)] grayscale-[0.5]";
     
-    let style = `border-slate-800/60 bg-slate-950/70 hover:border-slate-700/60 transition-all duration-300 ${isExpanded ? 'bg-slate-900/90 border-slate-700/80 shadow-lg' : ''}`;
+    let style = `border-slate-700/40 bg-slate-950/70 hover:border-slate-600/60 transition-all duration-300 ${isExpanded ? 'bg-slate-900/90 border-slate-600/80 shadow-lg' : ''}`;
     
     if (project.project_risk_band === "SAFE") {
       style = `transition-all duration-300 ${isExpanded ? 'border-emerald-500/60 bg-slate-900/95 shadow-[0_0_25px_-5px_rgba(16,185,129,0.25)]' : 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 to-slate-950/90 shadow-[0_0_15px_-3px_rgba(16,185,129,0.15)] hover:border-emerald-500/50'}`;
@@ -238,11 +238,11 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: "easeOut", delay: index * 0.06 }}
-      className={`relative flex flex-col rounded-2xl border p-3 sm:p-4 md:p-5 ${getCardBaseStyle()}`}
+      className={`relative flex flex-col rounded-2xl border backdrop-blur-md p-3 sm:p-4 md:p-5 ${getCardBaseStyle()}`}
     >
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
         {/* Identity row: Rank + Ticker + Info */}
-        <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+        <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0 flex-1 border-b border-slate-800/50 pb-3 sm:border-b-0 sm:pb-0">
           <RankIcon rank={rank} isExiled={isExiled} />
 
           <div className={`h-11 w-11 rounded-xl flex items-center justify-center font-black shadow-md flex-shrink-0 ${
@@ -265,21 +265,30 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
                 <RiskBandBadge band={project.project_risk_band} score={project.project_trust_score} />
               )}
             </div>
-            <div className="flex items-center gap-2 sm:gap-3 mt-1.5 flex-wrap">
-              <span className={`text-[10px] flex items-center gap-1 ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-500"}`}><Droplets className="h-3 w-3" />Liq: {fmtMC(project.liquidity_usd)}</span>
-              <span className={`text-[10px] flex items-center gap-1 ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-500"}`}><TrendingUp className="h-3 w-3" />Vol: {fmtMC(project.volume_24h)}</span>
-              <span className={`text-[10px] ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-600"}`}>{timeAgo(project.last_mc_update)}</span>
+            <div className="grid grid-cols-2 gap-1.5 mt-2 sm:flex sm:items-center sm:gap-3 sm:mt-1.5">
+              <span className={`text-xs sm:text-[10px] font-mono sm:font-sans flex items-center gap-1.5 bg-slate-800/50 rounded-lg px-2.5 py-2 sm:bg-transparent sm:p-0 sm:rounded-none ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-400 sm:text-slate-500"}`}>
+                <Droplets className="h-3 w-3" />Liq: {fmtMC(project.liquidity_usd)}
+              </span>
+              <span className={`text-xs sm:text-[10px] font-mono sm:font-sans flex items-center gap-1.5 bg-slate-800/50 rounded-lg px-2.5 py-2 sm:bg-transparent sm:p-0 sm:rounded-none ${isExiled ? "text-red-500/60" : isGhost ? "text-slate-700" : "text-slate-400 sm:text-slate-500"}`}>
+                <TrendingUp className="h-3 w-3" />Vol: {fmtMC(project.volume_24h)}
+              </span>
+              <span className={`text-[10px] col-span-2 sm:col-auto flex items-center justify-center sm:justify-start gap-1 bg-slate-800/40 rounded-lg px-2.5 py-1.5 sm:bg-transparent sm:p-0 sm:rounded-none ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-500 sm:text-slate-600"}`}>
+                {timeAgo(project.last_mc_update)}
+              </span>
             </div>
           </div>
         </div>
 
         {/* Market Cap + Expand */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0 sm:pl-2 pt-2 sm:pt-0 border-t border-slate-800/40 sm:border-t-0">
-          <div className="sm:text-right">
+        <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0 sm:pl-2">
+          <div className="bg-slate-800/50 rounded-lg px-3 py-2 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right">
+            <p className={`text-[10px] uppercase tracking-wider mb-1 sm:hidden ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-500"}`}>
+              {isExiled ? "RUGGED" : "Market Cap"}
+            </p>
             <span className={`text-xl font-black tabular-nums tracking-tight leading-none ${isExiled ? "text-red-500/50 line-through" : isGhost ? "text-slate-700" : project.last_valid_mc && project.last_valid_mc >= 1_000_000 ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.35)]" : project.last_valid_mc && project.last_valid_mc > 0 ? "text-amber-300 drop-shadow-[0_0_6px_rgba(251,191,36,0.2)]" : "text-slate-600"}`}>
               {fmtMC(project.last_valid_mc)}
             </span>
-            <p className={`text-[8px] uppercase tracking-[0.15em] mt-1 ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-600"}`}>
+            <p className={`hidden sm:block text-[8px] uppercase tracking-[0.15em] mt-1 ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-600"}`}>
               {isExiled ? "RUGGED" : "Market Cap"}
             </p>
           </div>

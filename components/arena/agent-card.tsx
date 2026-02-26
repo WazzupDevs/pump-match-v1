@@ -68,7 +68,7 @@ function getCardStyle(rank: number): string {
     return "border-slate-300/40 bg-gradient-to-br from-slate-400/5 to-transparent shadow-[0_0_20px_-5px_rgba(148,163,184,0.15)]";
   if (rank === 3)
     return "border-orange-400/40 bg-gradient-to-br from-orange-500/5 to-transparent shadow-[0_0_20px_-5px_rgba(251,146,60,0.15)]";
-  return "border-slate-800/60 bg-slate-950/70 hover:border-slate-700/60 hover:bg-slate-900/70";
+  return "border-slate-700/40 bg-slate-950/70 hover:border-slate-600/60 hover:bg-slate-900/70";
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -92,10 +92,10 @@ export function AgentCard({ agent, index }: AgentCardProps) {
         ease: "easeOut",
         delay: index * 0.06,
       }}
-      className={`relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 rounded-2xl border p-3 sm:p-4 md:p-5 transition-all duration-300 ${getCardStyle(agent.rank)}`}
+      className={`relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 rounded-2xl border backdrop-blur-md p-3 sm:p-4 md:p-5 transition-all duration-300 ${getCardStyle(agent.rank)}`}
     >
       {/* Identity row: Rank + Avatar + Info */}
-      <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+      <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 border-b border-slate-800/50 pb-3 sm:border-b-0 sm:pb-0">
         <RankIcon rank={agent.rank} />
 
         <div
@@ -124,23 +124,31 @@ export function AgentCard({ agent, index }: AgentCardProps) {
       </div>
 
       {/* Trust Score + Network Bonus */}
-      <div className="flex items-center gap-3 sm:block text-left sm:text-right flex-shrink-0 sm:pl-2 pt-2 sm:pt-0 border-t border-slate-800/40 sm:border-t-0">
-        <span
-          className={`text-2xl font-black tabular-nums tracking-tighter leading-none ${
-            displayScore >= 80
-              ? "text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.45)]"
-              : displayScore >= 50
-                ? "text-amber-300 drop-shadow-[0_0_6px_rgba(251,191,36,0.25)]"
-                : "text-rose-400"
-          }`}
-        >
-          {displayScore}
-        </span>
-        <div>
-          <p className="text-[8px] uppercase tracking-[0.15em] text-slate-600 sm:mt-0.5">
+      <div className="grid grid-cols-2 gap-2 sm:block sm:text-right flex-shrink-0 sm:pl-2">
+        <div className="bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 sm:hidden">
+            Trust Score
+          </p>
+          <span
+            className={`text-lg sm:text-2xl font-black tabular-nums tracking-tighter leading-none ${
+              displayScore >= 80
+                ? "text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.45)]"
+                : displayScore >= 50
+                  ? "text-amber-300 drop-shadow-[0_0_6px_rgba(251,191,36,0.25)]"
+                  : "text-rose-400"
+            }`}
+          >
+            {displayScore}
+          </span>
+          <p className="hidden sm:block text-[8px] uppercase tracking-[0.15em] text-slate-600 mt-0.5">
             Trust
           </p>
-          <p className="text-[9px] text-emerald-500 font-bold sm:mt-0.5 animate-pulse">
+        </div>
+        <div className="bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 sm:hidden">
+            Network
+          </p>
+          <p className="text-sm font-mono text-emerald-400 sm:text-[9px] font-bold sm:mt-0.5 animate-pulse">
             +5 Bonus
           </p>
         </div>

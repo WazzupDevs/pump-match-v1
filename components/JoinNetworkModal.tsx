@@ -231,28 +231,33 @@ export function JoinNetworkModal({
       aria-modal="true"
       aria-label={isEditing ? "Update network intent" : "Join network"}
     >
-      <div className="relative w-full max-w-md rounded-2xl border border-emerald-500/30 bg-zinc-900/90 backdrop-blur-xl shadow-[0_0_80px_rgba(16,185,129,0.15)] animate-in zoom-in-95 fade-in duration-200">
-        {/* Close button */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-4 top-4 rounded-full p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
-          aria-label="Close"
+      <div className="relative w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden rounded-2xl border border-emerald-500/30 bg-zinc-900/90 backdrop-blur-xl shadow-[0_0_80px_rgba(16,185,129,0.15)] animate-in zoom-in-95 fade-in duration-200">
+        {/* Sticky header: Close button + Title + Description */}
+        <div className="sticky top-0 z-10 flex-shrink-0 border-b border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-4 top-4 rounded-full p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="p-6 md:p-8 pr-12">
+            <h2 className="text-xl font-semibold text-slate-100 pr-8">
+              {isEditing
+                ? "Update Your Network Intent"
+                : "Join the Pump Match Network"}
+            </h2>
+            <p className="mt-2 text-sm text-slate-400 leading-relaxed">
+              Choose your intent to become visible to other elite agents.
+            </p>
+          </div>
+        </div>
+
+        {/* Scrollable body: overflow + premium scrollbar + bottom padding */}
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-12 pt-4 px-6 md:px-8 [scrollbar-width:thin] [scrollbar-color:rgb(63_63_70)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
         >
-          <X className="h-5 w-5" />
-        </button>
-
-        <div className="p-6 md:p-8">
-          {/* Header */}
-          <h2 className="text-xl font-semibold text-slate-100 pr-8">
-            {isEditing
-              ? "Update Your Network Intent"
-              : "Join the Pump Match Network"}
-          </h2>
-          <p className="mt-2 text-sm text-slate-400 leading-relaxed">
-            Choose your intent to become visible to other elite agents.
-          </p>
-
           {/* Username field */}
           <div className="mt-5">
             <label className="block text-[11px] uppercase tracking-[0.15em] text-slate-500 mb-1.5">
@@ -418,6 +423,7 @@ export function JoinNetworkModal({
                   : "Join Network"}
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>
