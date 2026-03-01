@@ -25,6 +25,7 @@ import type {
   BadgeCategory,
   BadgeId,
   MatchProfile,
+  PumpStats,
   ScoreBreakdown,
   SocialLinks,
   UserIntent,
@@ -128,121 +129,92 @@ function computeTokenDiversity(items: DasAsset[]): number {
   return uniqueTokens.size > 0 ? uniqueTokens.size : computeTokenCount(items);
 }
 
-function calculateScore(
-  solBalance: number,
-  transactionCount: number,
-  tokenDiversity: number,
-): ScoreBreakdown {
-  // Bakiye Puanı: Max 40 puan, her 1 SOL için puan ver
-  const balanceScore = Math.min(40, Math.floor(solBalance * 4));
+// ---------------- 1. BÖLÜM: BADGE & SCORE ENGINE ----------------
 
-  // Activity Score: Max 40 points — granular brackets prevent large gaps
-  // -1 sentinel = API error (getWalletTransactionData), treat as 0 for scoring
-  let activityScore = 0;
-
-  const isApiError = transactionCount === -1;
-  const effectiveTransactionCount = isApiError ? 0 : transactionCount;
-
-  if (effectiveTransactionCount >= 1000) {
-    activityScore = 40; // OG/Power User
-  } else if (effectiveTransactionCount >= 300) {
-    activityScore = 30; // Very Active
-  } else if (effectiveTransactionCount >= 100) {
-    activityScore = 22; // Active
-  } else if (effectiveTransactionCount >= 50) {
-    activityScore = 15; // Moderate
-  } else if (effectiveTransactionCount >= 10) {
-    activityScore = 7;  // Low Activity
-  } else if (effectiveTransactionCount >= 1) {
-    activityScore = 2;  // Minimal
-  }
-
-  // Çeşitlilik Puanı: Max 20 puan
-  const diversityScore = tokenDiversity > 5 ? 20 : Math.min(20, tokenDiversity * 4);
-
-  // Ceza: İşlem sayısı < 5 ise (yeni cüzdan/Fresh), toplam skordan -20 puan düş
-  // API hatasında ceza uygulanmaz
-  const penalty = effectiveTransactionCount < 5 && !isApiError ? 20 : 0;
-
-  const total = Math.max(0, Math.min(100, balanceScore + activityScore + diversityScore - penalty));
-
-  // Açıklama oluştur
-  const explanations: string[] = [];
-  if (isApiError) {
-    explanations.push("İşlem geçmişi alınamadı (teknik sorun)");
-  }
-  if (penalty > 0) {
-    explanations.push("Düşük aktivite sebebiyle puan kırıldı (Fresh cüzdan)");
-  }
-  if (balanceScore >= 30) {
-    explanations.push("Yüksek bakiye");
-  }
-  if (activityScore >= 40) {
-    explanations.push("OG/Power User activity level");
-  } else if (activityScore >= 30) {
-    explanations.push("Very active user");
-  } else if (activityScore >= 22) {
-    explanations.push("Active user");
-  } else if (activityScore >= 15 && !isApiError) {
-    explanations.push("Moderate activity");
-  } else if (activityScore >= 7 && !isApiError) {
-    explanations.push("Low activity");
-  }
-  if (diversityScore >= 15) {
-    explanations.push("Çeşitli token portföyü");
-  }
-  if (explanations.length === 0) {
-    explanations.push("Standart profil");
-  }
-
-  return {
-    balanceScore,
-    activityScore,
-    diversityScore,
-    penalty,
-    total,
-    explanation: explanations.join(" · "),
-  };
-}
-
-// Pump Match - Badge Definitions
 const BADGE_DEFINITIONS: Record<BadgeId, { label: string; category: BadgeCategory; baseWeight: number; icon: string }> = {
   whale: { label: "Whale", category: "SYSTEM", baseWeight: 6, icon: "Waves" },
   dev: { label: "Dev", category: "SYSTEM", baseWeight: 5, icon: "Code" },
   og_wallet: { label: "OG Wallet", category: "SYSTEM", baseWeight: 4, icon: "Clock" },
   community_trusted: { label: "Community Trusted", category: "SOCIAL", baseWeight: 7, icon: "ShieldCheck" },
+  diamond_hands: { label: "Diamond Hands", category: "SYSTEM", baseWeight: 10, icon: "Sparkles" },
+  mega_jeet: { label: "Mega Jeet", category: "SYSTEM", baseWeight: 0, icon: "Fish" },
+  rug_magnet: { label: "Rug Magnet", category: "SYSTEM", baseWeight: 0, icon: "AlertTriangle" },
 };
 
-/**
- * Pump Match - Badge Assignment (Server-Side)
- * Hard Type Badge ID'ler kullanılır.
- */
 function assignBadges(
   solBalance: number,
   transactionCount: number,
   tokenDiversity: number,
+  pumpStats: PumpStats | null,
 ): BadgeId[] {
   const badges: BadgeId[] = [];
 
-  // Balance > 10 => whale (System, Weight: 6)
-  if (solBalance > 10) {
-    badges.push("whale");
+  if (solBalance > 10) badges.push("whale");
+  if (transactionCount > 1000 && transactionCount !== -1) badges.push("og_wallet");
+  if (tokenDiversity > 10) badges.push("dev");
+
+  if (pumpStats && pumpStats.pumpMintsTouched >= 3) {
+    if (pumpStats.closedPositions >= 3 && pumpStats.jeetScore >= 90) badges.push("mega_jeet");
+    if (pumpStats.closedPositions >= 1 && pumpStats.jeetScore <= 10 && pumpStats.rugMagnetScore < 40) {
+      badges.push("diamond_hands");
+    }
+    if (pumpStats.rugMagnetScore >= 60 && pumpStats.pumpMintsTouched >= 10) badges.push("rug_magnet");
   }
-
-  // OG Wallet: Transaction count > 1000
-  if (transactionCount > 1000 && transactionCount !== -1) {
-    badges.push("og_wallet");
-  }
-
-  // Dev: Token diversity > 10
-  if (tokenDiversity > 10) {
-    badges.push("dev");
-  }
-
-  // community_trusted is NOT assigned here — it is only granted to opted-in
-  // users who have received >= 3 real endorsements (see analyzeWallet below).
-
   return badges;
+}
+
+function calculateScore(
+  solBalance: number,
+  transactionCount: number,
+  tokenDiversity: number,
+  pumpStats: PumpStats | null,
+): ScoreBreakdown {
+  const balanceScore = Math.min(40, Math.floor(solBalance * 4));
+  const isApiError = transactionCount === -1;
+  const effectiveTx = isApiError ? 0 : transactionCount;
+
+  let activityScore = 0;
+  if (effectiveTx >= 1000) activityScore = 40;
+  else if (effectiveTx >= 300) activityScore = 30;
+  else if (effectiveTx >= 100) activityScore = 22;
+  else if (effectiveTx >= 50) activityScore = 15;
+  else if (effectiveTx >= 10) activityScore = 7;
+  else if (effectiveTx >= 1) activityScore = 2;
+
+  const diversityScore = tokenDiversity > 5 ? 20 : Math.min(20, tokenDiversity * 4);
+  const basePenalty = effectiveTx < 5 && !isApiError ? 20 : 0;
+
+  const explanations: string[] = [];
+  let pumpPenalty = 0;
+  let pumpBonus = 0;
+
+  if (pumpStats && pumpStats.pumpMintsTouched >= 3) {
+    const jeetScale = pumpStats.closedPositions > 0 ? 1 : 0.35;
+    const jeetPen = Math.round(((pumpStats.jeetScore / 100) * 30) * jeetScale);
+    const rugPen = Math.round((pumpStats.rugMagnetScore / 100) * 20);
+
+    pumpPenalty += jeetPen + rugPen;
+
+    if (pumpStats.closedPositions >= 1 && pumpStats.jeetScore <= 10 && pumpStats.rugMagnetScore < 40) {
+      pumpBonus = 20;
+    }
+
+    if (jeetPen > 0) explanations.push(`Jeet Penalty (-${jeetPen})`);
+    if (rugPen > 0) explanations.push(`Rug Exposure (-${rugPen})`);
+    if (pumpBonus > 0) explanations.push(`Diamond Bonus (+${pumpBonus})`);
+  }
+
+  const baseScore = balanceScore + activityScore + diversityScore - basePenalty;
+  const total = Math.max(0, Math.min(100, baseScore - pumpPenalty + pumpBonus));
+
+  return {
+    balanceScore,
+    activityScore,
+    diversityScore,
+    penalty: basePenalty + pumpPenalty,
+    total,
+    explanation: explanations.join(" · ") || "Standard profile",
+  };
 }
 
 /**
@@ -335,7 +307,8 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     ]);
 
     const transactionCount = txData.transactionCount;
-    const firstTxData = txData; // Compatible shape: { approxWalletAgeDays, ... }
+    const firstTxData = txData;
+    const pumpStats = txData.pumpStats;
 
     // getAssetsByOwner null fallback
     const assetsByOwner = assetsByOwnerResult || { items: [], total: 0 };
@@ -384,7 +357,8 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     const totalAssets = fungibleTokens + totalNfts;
     const tokenDiversity = computeTokenDiversity(assetsByOwner.items);
     const activityCount = totalAssets + (transactionCount > 0 ? transactionCount : 0);
-    const scoreBreakdown = calculateScore(solBalance, transactionCount, tokenDiversity);
+    const scoreBreakdown = calculateScore(solBalance, transactionCount, tokenDiversity, pumpStats);
+    const badges = assignBadges(solBalance, transactionCount, tokenDiversity, pumpStats);
 
     const analysisResult: AnalyzeWalletResult = {
       address: trimmed,
@@ -397,9 +371,6 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       tokenDiversity,
       scoreBreakdown,
     };
-
-    // Badge assignment and score calculation (server-side only)
-    const badges = assignBadges(solBalance, transactionCount, tokenDiversity);
 
     const trustScore = scoreBreakdown.total;
     const score = trustScore;
@@ -460,8 +431,8 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       socialScore,
       intent: userIntent,
       isRegistered,
-      // Production Grade: Wallet age from first activity
       approxWalletAge: firstTxData.approxWalletAgeDays ?? undefined,
+      pumpStats,
     };
 
     // Match Engine: Calculate matches (read-only, mock data for preview)
@@ -1006,11 +977,7 @@ export async function updateProfileAction(
 
 /**
  * Endorse a network member. Proves key ownership via Ed25519 signature.
- * - Caller must be opted-in
- * - Cannot endorse self
- * - Rate limited: 5/day per wallet
- * - Idempotent: duplicate returns alreadyEndorsed=true
- * - After 3 endorsements the endorsed wallet earns community_trusted badge on next analyzeWallet
+ * Zirhli: message format + timestamp + trust score 50+ gerekli.
  */
 export async function endorseUserAction(
   fromWallet: string,
@@ -1020,68 +987,85 @@ export async function endorseUserAction(
   "use server";
 
   try {
-    const to = toWallet.trim();
+    const fromParam = fromWallet.trim();
+    const toParam = toWallet.trim();
 
-    // Derive authoritative fromWallet FROM the signed message content,
-    // not from the parameter — prevents IDOR via parameter tampering.
-    const fromMatch = signedMessage.message.match(/From:\s*([^\n]+)/);
-    const from = fromMatch?.[1]?.trim() ?? "";
+    if (!fromParam || !toParam) return { success: false, message: "Invalid wallet address." };
+    if (fromParam === toParam) return { success: false, message: "You cannot endorse yourself." };
 
-    // Basic validation
-    if (!from || !to) return { success: false, message: "Invalid wallet address." };
-    if (from === to) return { success: false, message: "You cannot endorse yourself." };
+    const m = signedMessage.message.match(
+      /^Pump Match Endorse\r?\nTarget:\s([1-9A-HJ-NP-Za-km-z]{32,44})\r?\nFrom:\s([1-9A-HJ-NP-Za-km-z]{32,44})\r?\nTimestamp:\s(\d{13})$/
+    );
+    if (!m) return { success: false, message: "Malformed signature message." };
 
-    // Signature verification (replay protection built into validateMessageTimestamp)
-    if (!validateMessageTimestamp(signedMessage.message)) {
-      return { success: false, message: "Signature expired. Please try again." };
-    }
-    // Verify sig against the from wallet derived from the message (not the client parameter)
-    const isValidSig = await verifyWalletSignature(from, signedMessage.message, signedMessage.signature);
-    if (!isValidSig) {
-      return { success: false, message: "Signature verification failed." };
+    const [, msgTarget, msgFrom, tsStr] = m;
+    const ts = Number(tsStr);
+
+    if (msgFrom !== fromParam || msgTarget !== toParam) {
+      return { success: false, message: "Message does not match parameters (tampering)." };
     }
 
-    // Caller must be an opted-in network member
-    const fromProfile = await getUserProfile(from);
-    if (!fromProfile?.isOptedIn) {
-      return { success: false, message: "You must join the network before endorsing others." };
+    const now = Date.now();
+    const TIME_WINDOW_MS = 5 * 60 * 1000;
+    const FUTURE_SKEW_MS = 30 * 1000;
+    if (!Number.isFinite(ts) || ts > now + FUTURE_SKEW_MS || now - ts > TIME_WINDOW_MS) {
+      return { success: false, message: "Signature expired or timestamp invalid." };
     }
 
-    // Rate limit: 5 endorsements per day per wallet
-    const rateCheck = await checkRateLimit(from, RATE_LIMITS.ENDORSE.maxRequests, RATE_LIMITS.ENDORSE.windowMs);
-    if (!rateCheck.allowed) {
-      return { success: false, message: "Endorsement limit reached (5/day). Try again tomorrow." };
+    const isValidSig = await verifyWalletSignature(fromParam, signedMessage.message, signedMessage.signature);
+    if (!isValidSig) return { success: false, message: "Signature verification failed." };
+
+    const fromProfile = await getUserProfile(fromParam);
+    if (!fromProfile?.isOptedIn) return { success: false, message: "You must join the network before endorsing." };
+    if ((fromProfile.trustScore ?? 0) < 50) return { success: false, message: "Security Block: Trust Score 50+ required to endorse." };
+
+    const toProfile = await getUserProfile(toParam);
+    if (!toProfile?.isOptedIn) return { success: false, message: "Target wallet is not a network member." };
+
+    const dayBucket = new Date().toISOString().slice(0, 10);
+    const redis = getRedisClient();
+    const doneKey = `endorse:done:${fromParam}:${toParam}`;
+    const lockKey = `endorse:lock:${fromParam}:${toParam}`;
+
+    if (redis) {
+      const already = await redis.get(doneKey);
+      if (already) return { success: true, message: "Already endorsed this user.", alreadyEndorsed: true };
+
+      const locked = await redis.set(lockKey, "1", { nx: true, ex: 15 });
+      if (!locked) return { success: false, message: "Request processing. Try again in 15 seconds." };
     }
 
-    // Target must also be in the network
-    const toProfile = await getUserProfile(to);
-    if (!toProfile?.isOptedIn) {
-      return { success: false, message: "Target wallet is not a network member." };
-    }
+    try {
+      const rateCheck = await checkRateLimit(
+        `endorse:${fromParam}:${dayBucket}`,
+        RATE_LIMITS.ENDORSE.maxRequests,
+        RATE_LIMITS.ENDORSE.windowMs
+      );
+      if (!rateCheck.allowed) return { success: false, message: "Endorsement limit reached (5/day)." };
 
-    // Write endorsement (idempotent via UNIQUE constraint)
-    const result = await addEndorsement(from, to);
-    if (!result.success) {
-      return { success: false, message: "Failed to record endorsement. Please try again." };
-    }
-    if (result.alreadyEndorsed) {
-      return { success: true, message: "Already endorsed.", alreadyEndorsed: true };
-    }
+      const result = await addEndorsement(fromParam, toParam);
+      if (result.alreadyEndorsed) {
+        if (redis) await redis.set(doneKey, "1", { ex: 90 * 24 * 60 * 60 });
+        return { success: true, message: "Already endorsed this user.", alreadyEndorsed: true };
+      }
+      if (!result.success) return { success: false, message: "Failed to record endorsement. Please try again." };
 
-    // Update endorsement count in target's social_proof (for UI consistency)
-    const newCount = await getEndorsementCount(to);
-    await upsertUser(to, {
-      socialProof: {
-        ...toProfile.socialProof,
-        endorsements: newCount,
-        communityTrusted: newCount >= 3,
-      },
-    });
+      if (redis) await redis.set(doneKey, "1", { ex: 90 * 24 * 60 * 60 });
 
-    return { success: true, message: `Successfully endorsed ${toProfile.username}!`, alreadyEndorsed: false };
+      const newCount = await getEndorsementCount(toParam);
+      await upsertUser(toParam, {
+        socialProof: {
+          ...toProfile.socialProof,
+          endorsements: newCount,
+          communityTrusted: newCount >= 3,
+        },
+      });
+
+      return { success: true, message: `Successfully endorsed ${toProfile.username}!`, alreadyEndorsed: false };
+    } finally {
+      if (redis) await redis.del(lockKey);
+    }
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(`[endorseUserAction] Exception:`, error);
     return { success: false, message: "Endorsement failed. Please try again." };
   }
 }

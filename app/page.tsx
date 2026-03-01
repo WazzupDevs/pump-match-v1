@@ -119,6 +119,14 @@ function formatWalletAge(days: number | undefined): string {
   return `${(days / 365).toFixed(1)} years`;
 }
 
+function formatHoldTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h`;
+  return `${(seconds / 86400).toFixed(1)}d`;
+}
+
 // ──────────────────────────────────────────────────────────────
 // Join Network modal: persist "Skip / Cancel" per wallet so we don't auto-open again
 // ──────────────────────────────────────────────────────────────
@@ -154,6 +162,17 @@ export default function Home() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   // Network Dopamine Layer - Success toast
   const [toast, setToast] = useState<string | null>(null);
+
+  // 1. ZIRH: Component Unmount (Sayfa değiştirme) durumunda state update sızıntısını önler
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // 2. ZIRH: Çift tıklama (Double-click) engeli için referans
+  const endorseInFlight = useRef<Set<string>>(new Set());
 
   // Auto-dismiss toast after 5 seconds
   useEffect(() => {
@@ -201,6 +220,27 @@ export default function Home() {
     },
     [publicKey, signMessage],
   );
+
+  // 3. ZIRH: Promise hatalarını yutmayan ve Unmount kontrolü yapan Endorse sarmalayıcısı
+  const safeEndorse = useCallback(async (addr: string) => {
+    if (endorseInFlight.current.has(addr)) return;
+    endorseInFlight.current.add(addr);
+    try {
+      await handleEndorse(addr);
+    } catch (error) {
+      if (mountedRef.current) {
+        setToast("Endorsement failed. Please try again.");
+      }
+    } finally {
+      endorseInFlight.current.delete(addr);
+    }
+  }, [handleEndorse]);
+
+  // UI Yetki Sınırları
+  const trust = analysis?.trustScore ?? 0;
+  const canWrite = trust >= 50;
+  const canEndorse = canWrite && analysis?.isRegistered;
+  const canConnect = canWrite && analysis?.isRegistered;
 
   // ──────────────────────────────────────────────────────────────
   // Persistent User Sessions: Auto-fetch user profile on wallet connect
@@ -914,6 +954,79 @@ export default function Home() {
                       Score calculated based on balance, token diversity, and asset count.
                     </p>
                   </div>
+
+                  {/* ⚠️ YENİ: PUMP.FUN DNA KARTI */}
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-5 shadow-lg shadow-emerald-500/15">
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500 flex items-center gap-2">
+                        💊 Pump.fun DNA
+                      </p>
+                      {analysis?.pumpStats?.pumpMintsTouched && analysis.pumpStats.pumpMintsTouched >= 3 && (
+                        <span className="text-[10px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          {analysis.pumpStats.closedPositions} Trades Closed
+                        </span>
+                      )}
+                    </div>
+
+                    {/* ZIRH 4: Null Safety ve Veri Kontratı Render Akışı */}
+                    {analysis?.pumpStats == null ? (
+                      <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
+                        <span className="text-2xl mb-2 opacity-50">😴</span>
+                        <p className="text-sm font-medium text-slate-400">No Pump Activity</p>
+                        <p className="text-[10px] text-slate-500 mt-1">Either very safe, or very boring.</p>
+                      </div>
+                    ) : analysis.pumpStats.pumpMintsTouched < 3 ? (
+                      <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
+                        <span className="text-2xl mb-2 opacity-50">🌱</span>
+                        <p className="text-sm font-medium text-slate-400">Insufficient Data</p>
+                        <p className="text-[10px] text-slate-500 mt-1">Only touched {analysis.pumpStats.pumpMintsTouched} tokens. Need at least 3 for a fair verdict.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        {/* Median Hold Time */}
+                        <div>
+                          <div className="flex justify-between text-xs mb-1.5">
+                            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Median Hold Time</span>
+                            <span className="font-mono font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded text-[11px]">
+                              {formatHoldTime(analysis.pumpStats.medianHoldTimeSeconds)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Jeet Meter */}
+                        <div>
+                          <div className="flex justify-between text-xs mb-1.5">
+                            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Jeet Behavior</span>
+                            <span className="font-mono text-rose-400 font-bold text-[11px]">
+                              {Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0}/100
+                            </span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-1000"
+                              style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0))}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Rug Magnet Meter */}
+                        <div>
+                          <div className="flex justify-between text-xs mb-1.5">
+                            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Rug Exposure (Dead Bags)</span>
+                            <span className="font-mono text-purple-400 font-bold text-[11px]">
+                              {Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0}/100
+                            </span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                            <div
+                              className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000"
+                              style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0))}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1046,7 +1159,15 @@ export default function Home() {
                         }}
                         onEndorse={
                           profile.address
-                            ? () => handleEndorse(profile.address!)
+                            ? () => {
+                                if (!canEndorse) {
+                                  if (mountedRef.current) setToast("⚠️ Access Denied: Trust Score 50+ required to endorse.");
+                                  return;
+                                }
+                                void safeEndorse(profile.address!).catch(() => {
+                                  if (mountedRef.current) setToast("Unexpected error occurred.");
+                                });
+                              }
                             : undefined
                         }
                       />

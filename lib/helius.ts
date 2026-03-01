@@ -1,4 +1,5 @@
 import "server-only";
+import type { PumpStats } from "@/types";
 
 // SECURITY: Server-only API key. NEVER use NEXT_PUBLIC_ prefix for Helius key —
 // that would expose it to the browser bundle and allow API abuse.
@@ -329,88 +330,195 @@ async function fetchEnhancedTransactionPage(
   }
 }
 
+const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+
+function isPumpTx(tx: EnhancedTransaction): boolean {
+  type TxWithIx = EnhancedTransaction & {
+    instructions?: Array<{ programId: string; innerInstructions?: Array<{ programId: string }> }>;
+    innerInstructions?: Array<{ programId: string }>;
+  };
+  const txAny = tx as TxWithIx;
+  for (const ix of txAny.instructions ?? []) {
+    if (ix.programId === PUMP_FUN_PROGRAM_ID) return true;
+    for (const inner of (ix as { innerInstructions?: Array<{ programId: string }> }).innerInstructions ?? []) {
+      if (inner.programId === PUMP_FUN_PROGRAM_ID) return true;
+    }
+  }
+  for (const inner of txAny.innerInstructions ?? []) {
+    if (inner.programId === PUMP_FUN_PROGRAM_ID) return true;
+  }
+  return false;
+}
+
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const a = [...nums].sort((x, y) => x - y);
+  const mid = Math.floor(a.length / 2);
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+}
+
+function jeetScoreFromMedianHold(holdSec: number): number {
+  if (holdSec <= 120) return 100;
+  if (holdSec <= 300) return 90;
+  if (holdSec <= 900) return 75;
+  if (holdSec <= 3600) return 50;
+  if (holdSec <= 14400) return 30;
+  if (holdSec <= 86400) return 10;
+  return 0;
+}
+
+type PositionState = {
+  balance: number;
+  openTs: number | null;
+  everPump: boolean;
+};
+
 /**
  * Unified wallet transaction data fetcher using Helius Enhanced Transactions API.
- * Replaces BOTH getWalletTransactionHistory AND getFirstTransaction.
- *
- * Single API flow returns:
- *   - Transaction count (paginated, up to 1000)
- *   - First (oldest) transaction info for wallet age calculation
- *   - Funding source detection from parsed nativeTransfers
- *
- * Returns transactionCount = -1 on API failure (to distinguish from actual 0 txs).
+ * Returns transaction count, wallet age, and Pump.fun stats (jeet/diamond/rug).
  */
 export async function getWalletTransactionData(address: string): Promise<{
   transactionCount: number;
   firstTxSignature: string | null;
   firstTxBlockTime: number | null;
   approxWalletAgeDays: number | null;
+  pumpStats: PumpStats | null;
 }> {
   try {
-    const allTransactions: EnhancedTransaction[] = [];
-
-    // Paginate through Enhanced API (100 per page, up to 1000 total)
-    const MAX_PAGES = 10;
+    const all: EnhancedTransaction[] = [];
+    const MAX_PAGES = 5;
     const PAGE_SIZE = 100;
     let cursor: string | undefined;
 
+    const states = new Map<string, PositionState>();
+    const pumpUniverse = new Set<string>();
+
     for (let page = 0; page < MAX_PAGES; page++) {
-      const batch = await fetchEnhancedTransactionPage(address, {
-        limit: PAGE_SIZE,
-        before: cursor,
-      });
+      const batch = await fetchEnhancedTransactionPage(address, { limit: PAGE_SIZE, before: cursor });
+      if (!batch.length) break;
 
-      if (batch.length === 0) break;
+      all.push(...batch);
 
-      allTransactions.push(...batch);
-      cursor = batch[batch.length - 1].signature;
+      for (const tx of batch) {
+        if (!tx.tokenTransfers?.length) continue;
+        if (isPumpTx(tx)) {
+          for (const tr of tx.tokenTransfers) {
+            if (tr?.mint) pumpUniverse.add(tr.mint);
+          }
+        }
+      }
 
-      // If we got fewer than PAGE_SIZE, we've reached the end
+      cursor = batch[batch.length - 1]?.signature;
       if (batch.length < PAGE_SIZE) break;
     }
 
-    const transactionCount = allTransactions.length;
-
+    const transactionCount = all.length;
     if (transactionCount === 0) {
-      return {
-        transactionCount: 0,
-        firstTxSignature: null,
-        firstTxBlockTime: null,
-        approxWalletAgeDays: null,
-      };
+      return { transactionCount: 0, firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null, pumpStats: null };
     }
 
-    // Enhanced API returns newest-first, so the last element is the oldest
-    const oldestTx = allTransactions[allTransactions.length - 1];
-    const firstTxSignature = oldestTx.signature;
-    const firstTxBlockTime = oldestTx.timestamp ?? null;
+    const oldest = all[all.length - 1];
+    const firstTxSignature = oldest.signature ?? null;
+    const firstTxBlockTime = oldest.timestamp ?? null;
+    const approxWalletAgeDays = firstTxBlockTime != null ? Math.floor((Date.now() - firstTxBlockTime * 1000) / 86400000) : null;
 
-    // Calculate approx wallet age in days
-    let approxWalletAgeDays: number | null = null;
-    if (firstTxBlockTime) {
-      // Helius Enhanced API returns timestamp in seconds (Unix epoch)
-      const ageMs = Date.now() - firstTxBlockTime * 1000;
-      approxWalletAgeDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+    const chronological = [...all].reverse();
+    const holds: number[] = [];
+    let closedPositions = 0;
+
+    for (const tx of chronological) {
+      const ts = tx.timestamp;
+      if (!ts || !tx.tokenTransfers?.length) continue;
+
+      const pump = isPumpTx(tx);
+
+      for (const tr of tx.tokenTransfers) {
+        const mint = tr?.mint;
+        if (!mint) continue;
+
+        const isLikelyPumpMint = pump || pumpUniverse.has(mint) || mint.endsWith("pump");
+        if (!isLikelyPumpMint) continue;
+
+        const from = tr.fromUserAccount;
+        const to = tr.toUserAccount;
+
+        const amt = Number(tr.tokenAmount ?? 0);
+        if (!Number.isFinite(amt) || amt === 0) continue;
+
+        const delta = to === address ? amt : from === address ? -amt : 0;
+        if (delta === 0) continue;
+
+        const st = states.get(mint) ?? { balance: 0, openTs: null, everPump: false };
+        if (pump) st.everPump = true;
+
+        const prevBal = st.balance;
+        const nextBal = prevBal + delta;
+
+        const EPSILON = 1e-9;
+
+        if (prevBal <= EPSILON && nextBal > EPSILON) {
+          st.openTs = ts;
+        }
+
+        if (prevBal > EPSILON && nextBal <= EPSILON && st.openTs != null) {
+          holds.push(Math.max(0, ts - st.openTs));
+          closedPositions++;
+          st.openTs = null;
+        }
+
+        const clamped = Math.abs(nextBal) <= EPSILON ? 0 : nextBal;
+        st.balance = clamped;
+        states.set(mint, st);
+      }
     }
 
-    // Funding source detection is available from nativeTransfers but intentionally
-    // NOT logged — wallet relationship data is private and must not be sent to
-    // external log aggregators (Sentry, Datadog, etc). GDPR compliance.
+    const nowSec = Math.floor(Date.now() / 1000);
+    let dead = 0;
+    let pumpMintsTouched = 0;
+
+    for (const [mint, st] of states.entries()) {
+      const counted = st.everPump || pumpUniverse.has(mint);
+      if (!counted) continue;
+
+      pumpMintsTouched++;
+
+      if (st.openTs != null) {
+        const hold = Math.max(0, nowSec - st.openTs);
+        holds.push(hold);
+        if (hold > 3 * 24 * 60 * 60) dead++;
+      }
+    }
+
+    if (pumpMintsTouched === 0) {
+      return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null };
+    }
+
+    const medianHold = Math.round(median(holds));
+    const jeetScore = jeetScoreFromMedianHold(medianHold);
+    const rugMagnetScore = Math.round((dead / pumpMintsTouched) * 100);
 
     return {
       transactionCount,
       firstTxSignature,
       firstTxBlockTime,
       approxWalletAgeDays,
+      pumpStats: {
+        pumpMintsTouched,
+        closedPositions,
+        medianHoldTimeSeconds: medianHold,
+        jeetScore,
+        rugMagnetScore,
+      },
     };
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(`[getWalletTransactionData] Exception for ${address}:`, error);
     return {
-      transactionCount: -1, // API error, not actual 0 transactions
+      transactionCount: -1,
       firstTxSignature: null,
       firstTxBlockTime: null,
       approxWalletAgeDays: null,
+      pumpStats: null,
     };
   }
 }

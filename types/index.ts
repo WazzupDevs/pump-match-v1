@@ -1,4 +1,11 @@
-export type BadgeId = "whale" | "dev" | "og_wallet" | "community_trusted";
+export type BadgeId =
+  | "whale"
+  | "dev"
+  | "og_wallet"
+  | "community_trusted"
+  | "mega_jeet"
+  | "diamond_hands"
+  | "rug_magnet";
 
 // Tek yerde tanımlanan Role tipi — MatchProfile, UserProfile ve NetworkAgent tarafından paylaşılır
 export type Role = "Dev" | "Artist" | "Marketing" | "Whale" | "Community";
@@ -8,6 +15,14 @@ export type UserIntent = "BUILD_SQUAD" | "FIND_FUNDING" | "HIRE_TALENT" | "JOIN_
 // Identity Hierarchy & Sorting - CTO Tuning
 // VERIFIED (Top) > REACHABLE > GHOST (Default)
 export type IdentityState = "VERIFIED" | "REACHABLE" | "GHOST";
+
+export type PumpStats = {
+  pumpMintsTouched: number;
+  closedPositions: number;
+  medianHoldTimeSeconds: number;
+  jeetScore: number;
+  rugMagnetScore: number;
+};
 
 export type ScoreBreakdown = {
   balanceScore: number;
@@ -118,6 +133,7 @@ export type WalletAnalysis = {
   isRegistered: boolean; // Is this wallet in the network registry?
   // Production Grade: Wallet age in days (from first activity, NOT creation date)
   approxWalletAge?: number; // Days since first detected activity
+  pumpStats: PumpStats | null;
 };
 
 export type MatchProfile = {

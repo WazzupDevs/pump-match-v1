@@ -3,6 +3,9 @@
  * Includes V1.5 Canonical JSON Engine + Legacy Plaintext Handlers
  */
 import "server-only";
+import bs58 from "bs58";
+import nacl from "tweetnacl";
+import { PublicKey } from "@solana/web3.js";
 
 // ─── 1. BASE58 DECODE & UTILS ───
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -36,30 +39,45 @@ function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
 // ─── 2. LEGACY SYSTEM (AnalyzeWallet ve Eski Sync işlemleri için) ───
 export const MESSAGE_MAX_AGE_MS = 5 * 60 * 1000;
 
-export function validateMessageTimestamp(message: string): boolean {
+export function validateMessageTimestamp(message: string, maxAgeMs: number = 300000): boolean {
   const match = message.match(/Timestamp:\s*(\d+)/);
   if (!match) return false;
-  const ts = parseInt(match[1], 10);
-  if (isNaN(ts)) return false;
-  return Math.abs(Date.now() - ts) <= MESSAGE_MAX_AGE_MS;
+  const timestamp = parseInt(match[1], 10);
+  const now = Date.now();
+  return !isNaN(timestamp) && (now - timestamp) <= maxAgeMs && timestamp <= now + 30000;
 }
 
 export async function verifyLegacySignature(
-  walletAddress: string,
+  address: string,
   message: string,
   signatureBase58: string,
 ): Promise<boolean> {
   try {
-    const { subtle } = globalThis.crypto;
-    const publicKeyBytes = base58Decode(walletAddress.trim());
+    if (typeof signatureBase58 !== "string" || signatureBase58.length < 80 || signatureBase58.length > 120) {
+      return false;
+    }
+    if (typeof message !== "string" || message.length === 0 || message.length > 500) {
+      return false;
+    }
+
+    let signatureBytes: Uint8Array;
+    try {
+      signatureBytes = bs58.decode(signatureBase58);
+    } catch {
+      return false;
+    }
+
+    if (signatureBytes.length !== 64) return false;
+
+    let publicKeyBytes: Uint8Array;
+    try {
+      publicKeyBytes = new PublicKey(address).toBytes();
+    } catch {
+      return false;
+    }
+
     const messageBytes = new TextEncoder().encode(message);
-    const signatureBytes = base58Decode(signatureBase58.trim());
-
-    const key = await subtle.importKey(
-      "raw", toArrayBuffer(publicKeyBytes), { name: "Ed25519" }, false, ["verify"]
-    );
-
-    return await subtle.verify("Ed25519", key, toArrayBuffer(signatureBytes), toArrayBuffer(messageBytes));
+    return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKeyBytes);
   } catch {
     return false;
   }
