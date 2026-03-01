@@ -20,6 +20,7 @@ import { ArenaLeaderboard } from "@/components/ArenaLeaderboard";
 import { WalletButton } from "@/components/ui/wallet-button";
 import { FilterSheet } from "@/components/ui/filter-sheet";
 import { Navbar } from "@/components/ui/navbar";
+import { ShareBar } from "@/components/profile/ShareBar";
 
 function formatAddress(address: string) {
   if (address.length <= 12) return address;
@@ -138,6 +139,8 @@ function getSkipJoinFlag(walletAddress: string): boolean {
   return localStorage.getItem(getSkipJoinKey(walletAddress)) === "true";
 }
 
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 export default function Home() {
   const { publicKey, connected, signMessage } = useWallet();
   const [query, setQuery] = useState("");
@@ -162,6 +165,10 @@ export default function Home() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   // Network Dopamine Layer - Success toast
   const [toast, setToast] = useState<string | null>(null);
+
+  // Sahiplik kontrolü: Sadece bağlı cüzdan analiz edilen cüzdanla aynıysa Paylaşım + DNA açılır
+  const connectedAddress = publicKey?.toBase58();
+  const isOwner = Boolean(analysis && connectedAddress === analysis.address);
 
   // 1. ZIRH: Component Unmount (Sayfa değiştirme) durumunda state update sızıntısını önler
   const mountedRef = useRef(true);
@@ -348,59 +355,70 @@ export default function Home() {
     return points;
   }, [analysis]);
 
-  const handleAnalyze = useCallback(async (addressOverride?: string) => {
-    const address = (addressOverride ?? query).trim();
-    if (!address) {
-      setError("Please enter a wallet address.");
-      return;
-    }
-
-    setError(null);
-    setLoading(true);
-    setLoadingPhase("Analyzing...");
-
-    try {
-      const response = await analyzeWallet(address, userIntent || undefined);
-
-      const walletAnalysis = response.walletAnalysis;
-      
-      // v2: Intent Layer - Show modal if intent not selected after analysis (unless user skipped for this wallet)
-      if (!userIntent) {
-        const walletAddress = publicKey?.toBase58();
-        const skipKey = walletAddress ? `pumpmatch_skip_intent_${walletAddress}` : null;
-        if (!skipKey || (typeof window !== "undefined" && localStorage.getItem(skipKey) !== "true")) {
-          setShowIntentModal(true);
-        }
+  const handleAnalyze = useCallback(
+    async (addressOverride?: string) => {
+      const address = (addressOverride ?? query).trim();
+      if (!address) {
+        setError("Please enter a wallet address.");
+        return;
       }
-      
-      setAnalysis(walletAnalysis);
-      
-      // Opt-In Network Architecture - If registered, fetch network matches
-      if (walletAnalysis.isRegistered) {
-        setLoadingPhase("Fetching Network Matches...");
-        try {
-          const networkMatches = await getNetworkMatches(walletAnalysis.address, walletAnalysis);
-          setMatches(networkMatches);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error("Failed to fetch network matches:", err);
-          setMatches(response.matches); // Fallback to mock matches
-        }
-      } else {
-        setMatches(response.matches);
+      if (!BASE58_RE.test(address)) {
+        setError("Invalid Solana address format.");
+        return;
       }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(err);
-      const errorMsg = err instanceof Error ? err.message : "An error occurred during analysis.";
-      setError(errorMsg);
-      setAnalysis(null);
-      setMatches([]);
-    } finally {
-      setLoading(false);
-      setLoadingPhase("");
-    }
-  }, [query, userIntent]);
+
+      setError(null);
+      setLoading(true);
+      setLoadingPhase("Analyzing...");
+
+      try {
+        const response = await analyzeWallet(address, userIntent || undefined);
+        const walletAnalysis = response.walletAnalysis;
+
+        if (!userIntent) {
+          const walletAddress = publicKey?.toBase58();
+          const skipKey = walletAddress ? `pumpmatch_skip_intent_${walletAddress}` : null;
+          if (
+            !skipKey ||
+            (typeof window !== "undefined" && localStorage.getItem(skipKey) !== "true")
+          ) {
+            setShowIntentModal(true);
+          }
+        }
+
+        setAnalysis(walletAnalysis);
+
+        if (walletAnalysis.isRegistered) {
+          setLoadingPhase("Fetching Network Matches...");
+          try {
+            const networkMatches = await getNetworkMatches(
+              walletAnalysis.address,
+              walletAnalysis,
+            );
+            setMatches(networkMatches);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error("Failed to fetch network matches:", err);
+            setMatches(response.matches);
+          }
+        } else {
+          setMatches(response.matches);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(err);
+        const errorMsg =
+          err instanceof Error ? err.message : "An error occurred during analysis.";
+        setError(errorMsg);
+        setAnalysis(null);
+        setMatches([]);
+      } finally {
+        setLoading(false);
+        setLoadingPhase("");
+      }
+    },
+    [query, userIntent, publicKey],
+  );
 
   // Handle "Analyze My Wallet" when wallet is connected
   const handleAnalyzeMyWallet = useCallback(() => {
@@ -676,6 +694,20 @@ export default function Home() {
                   LIVE DATA
                 </span>
               </div>
+
+              {analysis && isOwner && (
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 mt-8 p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+                  <div>
+                    <h3 className="text-lg font-semibold text-emerald-400">Your On-Chain CV is Ready!</h3>
+                    <p className="text-sm text-slate-400">Share your public profile to flex your stats or get endorsements.</p>
+                  </div>
+                  <ShareBar
+                    address={analysis.address}
+                    trustScore={analysis.trustScore}
+                    profileUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/profile/${analysis.address}`}
+                  />
+                </div>
+              )}
 
               <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.2fr)] items-start">
                 {/* TRUST SCORE HERO CARD */}
@@ -955,78 +987,90 @@ export default function Home() {
                     </p>
                   </div>
 
-                  {/* ⚠️ YENİ: PUMP.FUN DNA KARTI */}
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-5 shadow-lg shadow-emerald-500/15">
-                    <div className="flex items-center justify-between mb-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500 flex items-center gap-2">
-                        💊 Pump.fun DNA
-                      </p>
-                      {analysis?.pumpStats?.pumpMintsTouched && analysis.pumpStats.pumpMintsTouched >= 3 && (
-                        <span className="text-[10px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          {analysis.pumpStats.closedPositions} Trades Closed
-                        </span>
+                  {/* ⚠️ PUMP.FUN DNA KARTI - SAHİPLİK KONTROLÜ */}
+                  {isOwner ? (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-5 shadow-lg shadow-emerald-500/15">
+                      <div className="flex items-center justify-between mb-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500 flex items-center gap-2">
+                          💊 Pump.fun DNA
+                        </p>
+                        {analysis?.pumpStats?.pumpMintsTouched && analysis.pumpStats.pumpMintsTouched >= 3 && (
+                          <span className="text-[10px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                            {analysis.pumpStats.closedPositions} Trades Closed
+                          </span>
+                        )}
+                      </div>
+
+                      {/* ZIRH 4: Null Safety ve Veri Kontratı Render Akışı */}
+                      {analysis?.pumpStats == null ? (
+                        <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
+                          <span className="text-2xl mb-2 opacity-50">😴</span>
+                          <p className="text-sm font-medium text-slate-400">No Pump Activity</p>
+                          <p className="text-[10px] text-slate-500 mt-1">Either very safe, or very boring.</p>
+                        </div>
+                      ) : analysis.pumpStats.pumpMintsTouched < 3 ? (
+                        <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
+                          <span className="text-2xl mb-2 opacity-50">🌱</span>
+                          <p className="text-sm font-medium text-slate-400">Insufficient Data</p>
+                          <p className="text-[10px] text-slate-500 mt-1">Only touched {analysis.pumpStats.pumpMintsTouched} tokens. Need at least 3 for a fair verdict.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-5">
+                          {/* Median Hold Time */}
+                          <div>
+                            <div className="flex justify-between text-xs mb-1.5">
+                              <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Median Hold Time</span>
+                              <span className="font-mono font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded text-[11px]">
+                                {formatHoldTime(analysis.pumpStats.medianHoldTimeSeconds)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Jeet Meter */}
+                          <div>
+                            <div className="flex justify-between text-xs mb-1.5">
+                              <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Jeet Behavior</span>
+                              <span className="font-mono text-rose-400 font-bold text-[11px]">
+                                {Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0}/100
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                              <div
+                                className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-1000"
+                                style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0))}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Rug Magnet Meter */}
+                          <div>
+                            <div className="flex justify-between text-xs mb-1.5">
+                              <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Rug Exposure (Dead Bags)</span>
+                              <span className="font-mono text-purple-400 font-bold text-[11px]">
+                                {Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0}/100
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                              <div
+                                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000"
+                                style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0))}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
-
-                    {/* ZIRH 4: Null Safety ve Veri Kontratı Render Akışı */}
-                    {analysis?.pumpStats == null ? (
-                      <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
-                        <span className="text-2xl mb-2 opacity-50">😴</span>
-                        <p className="text-sm font-medium text-slate-400">No Pump Activity</p>
-                        <p className="text-[10px] text-slate-500 mt-1">Either very safe, or very boring.</p>
+                  ) : (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-8 flex flex-col items-center justify-center text-center shadow-lg">
+                      <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center mb-4">
+                        <Lock className="h-5 w-5 text-slate-400" />
                       </div>
-                    ) : analysis.pumpStats.pumpMintsTouched < 3 ? (
-                      <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
-                        <span className="text-2xl mb-2 opacity-50">🌱</span>
-                        <p className="text-sm font-medium text-slate-400">Insufficient Data</p>
-                        <p className="text-[10px] text-slate-500 mt-1">Only touched {analysis.pumpStats.pumpMintsTouched} tokens. Need at least 3 for a fair verdict.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-5">
-                        {/* Median Hold Time */}
-                        <div>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Median Hold Time</span>
-                            <span className="font-mono font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded text-[11px]">
-                              {formatHoldTime(analysis.pumpStats.medianHoldTimeSeconds)}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Jeet Meter */}
-                        <div>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Jeet Behavior</span>
-                            <span className="font-mono text-rose-400 font-bold text-[11px]">
-                              {Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0}/100
-                            </span>
-                          </div>
-                          <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                            <div
-                              className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-1000"
-                              style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0))}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Rug Magnet Meter */}
-                        <div>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Rug Exposure (Dead Bags)</span>
-                            <span className="font-mono text-purple-400 font-bold text-[11px]">
-                              {Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0}/100
-                            </span>
-                          </div>
-                          <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                            <div
-                              className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000"
-                              style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0))}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                      <h3 className="text-lg font-semibold text-slate-200 mb-2">Classified Pump.fun DNA</h3>
+                      <p className="text-sm text-slate-400 max-w-sm">
+                        Detailed trading behaviors, Jeet metrics, and Rug exposures are private. You must connect this wallet to view its DNA.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1159,14 +1203,20 @@ export default function Home() {
                         }}
                         onEndorse={
                           profile.address
-                            ? () => {
+                            ? async () => {
+                                // 1. Başarısız Senaryo Dönüşü
                                 if (!canEndorse) {
                                   if (mountedRef.current) setToast("⚠️ Access Denied: Trust Score 50+ required to endorse.");
-                                  return;
+                                  return { success: false, message: "Trust Score 50+ required." };
                                 }
-                                void safeEndorse(profile.address!).catch(() => {
-                                  if (mountedRef.current) setToast("Unexpected error occurred.");
-                                });
+
+                                // 2. İşlemi Bekle ve Başarılı Senaryo Dönüşü
+                                try {
+                                  await safeEndorse(profile.address!);
+                                  return { success: true, message: "Endorsement sent!" };
+                                } catch (error) {
+                                  return { success: false, message: "Endorsement failed." };
+                                }
                               }
                             : undefined
                         }
