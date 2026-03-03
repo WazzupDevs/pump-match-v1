@@ -331,6 +331,12 @@ async function fetchEnhancedTransactionPage(
 }
 
 const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const PUMP_FUN_EPOCH_SEC = 1704067200; // 2024-01-01 UTC, seconds
+
+// Zaman Birimi Zırhı (Helius bazen ms, bazen sec dönebilir)
+function toSec(ts: number): number {
+  return ts > 1_000_000_000_000 ? Math.floor(ts / 1000) : ts;
+}
 
 function isPumpTx(tx: EnhancedTransaction): boolean {
   type TxWithIx = EnhancedTransaction & {
@@ -373,10 +379,87 @@ type PositionState = {
   everPump: boolean;
 };
 
-/**
- * Unified wallet transaction data fetcher using Helius Enhanced Transactions API.
- * Returns transaction count, wallet age, and Pump.fun stats (jeet/diamond/rug).
- */
+const EPSILON = 1e-9;
+
+// 🔥 Saf Simülasyon Motoru (Hatalı Tokenları Eler)
+function simulatePump(
+  address: string,
+  txs: EnhancedTransaction[],
+  pumpUniverse: Set<string>,
+) {
+  const states = new Map<string, PositionState>();
+  const holds: number[] = [];
+  let closedPositions = 0;
+
+  const chronological = [...txs].reverse(); // oldest -> newest
+
+  for (const tx of chronological) {
+    const tsRaw = tx.timestamp;
+    if (!tsRaw || !tx.tokenTransfers?.length) continue;
+
+    const ts = toSec(tsRaw);
+    const pumpTx = isPumpTx(tx);
+
+    for (const tr of tx.tokenTransfers) {
+      const mint = tr?.mint;
+      if (!mint) continue;
+
+      // ✅ KRİTİK DÜZELTME: Sadece gerçek pump ekosistemi, mint.endsWith("pump") FALAN YOK!
+      const isPumpMint = pumpTx || pumpUniverse.has(mint);
+      if (!isPumpMint) continue;
+
+      const amt = Number(tr.tokenAmount ?? 0);
+      if (!Number.isFinite(amt) || amt === 0) continue;
+
+      const delta =
+        tr.toUserAccount === address ? amt :
+        tr.fromUserAccount === address ? -amt :
+        0;
+
+      if (delta === 0) continue;
+
+      const st = states.get(mint) ?? { balance: 0, openTs: null, everPump: false };
+      if (pumpTx) st.everPump = true;
+
+      const prevBal = st.balance;
+      const nextBal = prevBal + delta;
+
+      if (prevBal <= EPSILON && nextBal > EPSILON) st.openTs = ts;
+
+      if (prevBal > EPSILON && nextBal <= EPSILON && st.openTs != null) {
+        holds.push(Math.max(0, ts - st.openTs));
+        closedPositions++;
+        st.openTs = null;
+      }
+
+      st.balance = Math.abs(nextBal) <= EPSILON ? 0 : nextBal;
+      states.set(mint, st);
+    }
+  }
+
+  // Açık pozisyonları ve ölü çantaları (dead bags) hesapla
+  const nowSec = Math.floor(Date.now() / 1000);
+  let dead = 0;
+  let pumpMintsTouched = 0;
+
+  for (const [mint, st] of states.entries()) {
+    // Sadece kanıtlanmış tokenları say
+    const counted = st.everPump || pumpUniverse.has(mint);
+    if (!counted) continue;
+
+    pumpMintsTouched++;
+
+    if (st.openTs != null) {
+      const hold = Math.max(0, nowSec - st.openTs);
+      holds.push(hold);
+      if (hold > 3 * 24 * 60 * 60) dead++; // 3 günden eskiyse ölü
+    }
+  }
+
+  return { holds, closedPositions, pumpMintsTouched, dead };
+}
+
+// 🚀 Zırhlanmış Ana Veri Çekme Fonksiyonu
 export async function getWalletTransactionData(address: string): Promise<{
   transactionCount: number;
   firstTxSignature: string | null;
@@ -388,9 +471,12 @@ export async function getWalletTransactionData(address: string): Promise<{
     const all: EnhancedTransaction[] = [];
     const MAX_PAGES = 5;
     const PAGE_SIZE = 100;
-    let cursor: string | undefined;
 
-    const states = new Map<string, PositionState>();
+    const EARLY_STOP_PAGES = 2;       // 200 tx
+    const CLOSED_POS_TARGET = 30;     // Stat sufficiency (İstatistiksel yeterlilik sınırı)
+
+    let cursor: string | undefined;
+    let pumpTxCountSoFar = 0;
     const pumpUniverse = new Set<string>();
 
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -399,16 +485,36 @@ export async function getWalletTransactionData(address: string): Promise<{
 
       all.push(...batch);
 
+      // pump universe & pump tx counter güncellemeleri
       for (const tx of batch) {
         if (!tx.tokenTransfers?.length) continue;
         if (isPumpTx(tx)) {
+          pumpTxCountSoFar++;
           for (const tr of tx.tokenTransfers) {
             if (tr?.mint) pumpUniverse.add(tr.mint);
           }
         }
       }
 
-      cursor = batch[batch.length - 1]?.signature;
+      const oldestTxInBatch = batch[batch.length - 1];
+      cursor = oldestTxInBatch?.signature;
+
+      // 1) Epoch cutoff (Pump.fun çıkış tarihinden öncesine gitme)
+      const oldestTsRaw = oldestTxInBatch?.timestamp;
+      if (oldestTsRaw) {
+        const oldestSec = toSec(oldestTsRaw);
+        if (oldestSec < PUMP_FUN_EPOCH_SEC) break;
+      }
+
+      // 2) Relevance early stop (2 sayfa çektik ama hala Pump tx yoksa işlemi kes)
+      if (page === EARLY_STOP_PAGES - 1 && pumpTxCountSoFar === 0) break;
+
+      // 3) Stat sufficiency (Yeterli veri bulduysak, gereksiz sayfa çekme)
+      if (pumpTxCountSoFar > 0 && page >= 1) {
+        const sim = simulatePump(address, all, pumpUniverse);
+        if (sim.closedPositions >= CLOSED_POS_TARGET) break;
+      }
+
       if (batch.length < PAGE_SIZE) break;
     }
 
@@ -420,74 +526,15 @@ export async function getWalletTransactionData(address: string): Promise<{
     const oldest = all[all.length - 1];
     const firstTxSignature = oldest.signature ?? null;
     const firstTxBlockTime = oldest.timestamp ?? null;
-    const approxWalletAgeDays = firstTxBlockTime != null ? Math.floor((Date.now() - firstTxBlockTime * 1000) / 86400000) : null;
+    const firstTxSec = firstTxBlockTime != null ? toSec(firstTxBlockTime) : null;
+    const approxWalletAgeDays = firstTxSec != null ? Math.floor((Date.now() - firstTxSec * 1000) / 86400000) : null;
 
-    const chronological = [...all].reverse();
-    const holds: number[] = [];
-    let closedPositions = 0;
-
-    for (const tx of chronological) {
-      const ts = tx.timestamp;
-      if (!ts || !tx.tokenTransfers?.length) continue;
-
-      const pump = isPumpTx(tx);
-
-      for (const tr of tx.tokenTransfers) {
-        const mint = tr?.mint;
-        if (!mint) continue;
-
-        const isLikelyPumpMint = pump || pumpUniverse.has(mint) || mint.endsWith("pump");
-        if (!isLikelyPumpMint) continue;
-
-        const from = tr.fromUserAccount;
-        const to = tr.toUserAccount;
-
-        const amt = Number(tr.tokenAmount ?? 0);
-        if (!Number.isFinite(amt) || amt === 0) continue;
-
-        const delta = to === address ? amt : from === address ? -amt : 0;
-        if (delta === 0) continue;
-
-        const st = states.get(mint) ?? { balance: 0, openTs: null, everPump: false };
-        if (pump) st.everPump = true;
-
-        const prevBal = st.balance;
-        const nextBal = prevBal + delta;
-
-        const EPSILON = 1e-9;
-
-        if (prevBal <= EPSILON && nextBal > EPSILON) {
-          st.openTs = ts;
-        }
-
-        if (prevBal > EPSILON && nextBal <= EPSILON && st.openTs != null) {
-          holds.push(Math.max(0, ts - st.openTs));
-          closedPositions++;
-          st.openTs = null;
-        }
-
-        const clamped = Math.abs(nextBal) <= EPSILON ? 0 : nextBal;
-        st.balance = clamped;
-        states.set(mint, st);
-      }
+    if (pumpTxCountSoFar === 0) {
+      return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null };
     }
 
-    const nowSec = Math.floor(Date.now() / 1000);
-    let dead = 0;
-    let pumpMintsTouched = 0;
-
-    for (const [mint, st] of states.entries()) {
-      const counted = st.everPump || pumpUniverse.has(mint);
-      if (!counted) continue;
-
-      pumpMintsTouched++;
-
-      if (st.openTs != null) {
-        const hold = Math.max(0, nowSec - st.openTs);
-        holds.push(hold);
-        if (hold > 3 * 24 * 60 * 60) dead++;
-      }
-    }
+    // Gerçek Simülasyon
+    const { holds, closedPositions, pumpMintsTouched, dead } = simulatePump(address, all, pumpUniverse);
 
     if (pumpMintsTouched === 0) {
       return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null };
@@ -511,14 +558,7 @@ export async function getWalletTransactionData(address: string): Promise<{
       },
     };
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(`[getWalletTransactionData] Exception for ${address}:`, error);
-    return {
-      transactionCount: -1,
-      firstTxSignature: null,
-      firstTxBlockTime: null,
-      approxWalletAgeDays: null,
-      pumpStats: null,
-    };
+    return { transactionCount: -1, firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null, pumpStats: null };
   }
 }

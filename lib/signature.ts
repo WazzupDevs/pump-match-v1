@@ -47,17 +47,28 @@ export function validateMessageTimestamp(message: string, maxAgeMs: number = 300
   return !isNaN(timestamp) && (now - timestamp) <= maxAgeMs && timestamp <= now + 30000;
 }
 
+// lib/signature.ts
+
 export async function verifyLegacySignature(
   address: string,
-  message: string,
+  message: string | Uint8Array, // 🔥 ARTIK DOĞRUDAN BYTES KABUL EDİYOR
   signatureBase58: string,
 ): Promise<boolean> {
   try {
     if (typeof signatureBase58 !== "string" || signatureBase58.length < 80 || signatureBase58.length > 120) {
       return false;
     }
-    if (typeof message !== "string" || message.length === 0 || message.length > 500) {
-      return false;
+
+    let messageBytes: Uint8Array;
+    
+    // Geriye dönük uyumluluk (V1 Endorsement için)
+    if (typeof message === "string") {
+      if (message.length === 0 || message.length > 500) return false;
+      messageBytes = new TextEncoder().encode(message);
+    } else {
+      // V2 Governance ve Byte-Native işlemler için doğrudan kabul et
+      if (message.length === 0 || message.length > 1024) return false;
+      messageBytes = message;
     }
 
     let signatureBytes: Uint8Array;
@@ -76,13 +87,12 @@ export async function verifyLegacySignature(
       return false;
     }
 
-    const messageBytes = new TextEncoder().encode(message);
+    // Nacl doğrudan byte array'ler ile kusursuz ve deterministik çalışır
     return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKeyBytes);
   } catch {
     return false;
   }
 }
-
 // ─── 3. PUMPMATCH V1.5 CANONICAL JSON ENGINE (Squad İşlemleri İçin) ───
 export interface PumpMatchPayload {
   action: string;
@@ -165,4 +175,46 @@ export async function verifyWalletSignature(
     console.error("[Signature Verification Error]", err instanceof Error ? err.message : String(err));
     return { isValid: false, error: 'Internal verification failure.' };
   }
+}
+
+// ─── 4. SQUAD TRANSITION V2 (Byte-Native, verifyLegacySignature ile) ───
+export type SquadTransitionPayloadV2 = {
+  v: number;
+  domain: string;
+  chain: string;
+  projectId: string;
+  actorWallet: string;
+  targetWallet: string;
+  actionType: string;
+  nonce: string;
+  timestamp: number;
+};
+
+const SQUAD_V2_MAX_AGE_MS = 5 * 60 * 1000;
+const SQUAD_V2_FUTURE_SKEW_MS = 30 * 1000;
+
+export function validateSquadTransitionPayloadV2(
+  payload: SquadTransitionPayloadV2
+): { ok: true } | { ok: false; error: string } {
+  if (payload.v !== 2) return { ok: false, error: "Unsupported payload version." };
+  if (payload.domain !== "pumpmatch-governance") return { ok: false, error: "Invalid domain." };
+  const now = Date.now();
+  const ts = Number(payload.timestamp);
+  if (!Number.isFinite(ts)) return { ok: false, error: "Invalid timestamp." };
+  if (ts > now + SQUAD_V2_FUTURE_SKEW_MS) return { ok: false, error: "Timestamp in future." };
+  if (now - ts > SQUAD_V2_MAX_AGE_MS) return { ok: false, error: "Signature expired." };
+  return { ok: true };
+}
+
+export function generateCanonicalMessageV2(payload: SquadTransitionPayloadV2): Uint8Array {
+  type Scalar = string | number | boolean | null;
+  const record = payload as unknown as Record<string, Scalar>;
+  const sortedKeys = Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const canonical: Record<string, Scalar> = {};
+  for (const k of sortedKeys) {
+    const v = record[k];
+    if (typeof v === "object" && v !== null) throw new Error("Nested objects not allowed in V2 canonical.");
+    canonical[k] = v;
+  }
+  return new TextEncoder().encode(JSON.stringify(canonical));
 }

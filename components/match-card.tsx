@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  UserPlus, Code, Palette, Megaphone, Waves, Users, Lock, BadgeCheck, ShieldCheck, Crown, Clock,
+  UserPlus, Code, Palette, Megaphone, Waves, Users, BadgeCheck, ShieldCheck, Crown, Clock,
   DollarSign, Rocket, TrendingUp, Image, Tags, Target, Handshake, Gem, Scale,
   AlertTriangle, Shield, Heart, UserX, Link, ShieldOff, Info, Twitter, Send, X,
   type LucideIcon,
 } from "lucide-react";
-import type { IdentityState, MatchProfile, MatchReason, UserIntent } from "@/types";
+import type { IdentityState, MatchProfile, UserIntent } from "@/types";
 import { getReasonConfig, sortMatchReasons, getMentorTip } from "@/lib/utils";
 
 type EndorseState = "idle" | "pending" | "success" | "already" | "error";
@@ -166,9 +166,39 @@ function getIdentityGlowClass(identityState?: IdentityState): string {
 
 export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn }: MatchCardProps) {
   const [showSocials, setShowSocials] = useState(false);
-  const [endorseState, setEndorseState] = useState<EndorseState>(
-    profile.isEndorsedByMe ? "already" : "idle",
-  );
+  const [isEndorsePending, setIsEndorsePending] = useState(false);
+  const [endorseTransientState, setEndorseTransientState] = useState<"success" | "error" | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endorseInFlightRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const scheduleResetTransientState = () => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+    }
+    resetTimerRef.current = setTimeout(() => {
+      setEndorseTransientState(null);
+      resetTimerRef.current = null;
+    }, 3000);
+  };
+
+  const endorseState: EndorseState = isEndorsePending
+    ? "pending"
+    : profile.isEndorsedByMe
+      ? "already"
+      : endorseTransientState === "success"
+        ? "success"
+        : endorseTransientState === "error"
+          ? "error"
+          : "idle";
+
   const avatarColor = generateAvatarColor(profile.username);
   const roleColorClass = getRoleColor(profile.role);
   const trustScoreColor = getTrustScoreColor(profile.trustScore);
@@ -465,20 +495,28 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
           <button
             disabled={endorseState === "pending" || endorseState === "already" || endorseState === "success"}
             onClick={async () => {
-              setEndorseState("pending");
+              if (endorseInFlightRef.current) return;
+              endorseInFlightRef.current = true;
+              setIsEndorsePending(true);
+              setEndorseTransientState(null);
+
               try {
                 const result = await onEndorse();
+
                 if (result.alreadyEndorsed) {
-                  setEndorseState("already");
+                  setEndorseTransientState(null);
                 } else if (result.success) {
-                  setEndorseState("success");
+                  setEndorseTransientState("success");
                 } else {
-                  setEndorseState("error");
-                  setTimeout(() => setEndorseState("idle"), 3000);
+                  setEndorseTransientState("error");
+                  scheduleResetTransientState();
                 }
               } catch {
-                setEndorseState("error");
-                setTimeout(() => setEndorseState("idle"), 3000);
+                setEndorseTransientState("error");
+                scheduleResetTransientState();
+              } finally {
+                setIsEndorsePending(false);
+                endorseInFlightRef.current = false;
               }
             }}
             title={

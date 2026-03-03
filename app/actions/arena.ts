@@ -9,11 +9,14 @@ import { syncArenaMarketCaps } from "@/lib/arena-sync";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
 
 // 🔥 TEK VE DOĞRU İMPORT SATIRI (Çakışmaları önler)
-import { 
-  verifyWalletSignature, 
-  verifyLegacySignature, 
-  validateMessageTimestamp, 
-  type PumpMatchPayload 
+import {
+  verifyWalletSignature,
+  verifyLegacySignature,
+  validateMessageTimestamp,
+  validateSquadTransitionPayloadV2,
+  generateCanonicalMessageV2,
+  type PumpMatchPayload,
+  type SquadTransitionPayloadV2,
 } from "@/lib/signature";
 
 const ENV = process.env.NODE_ENV === 'production' ? 'production' : 'development';
@@ -362,33 +365,75 @@ export async function joinSquadAction(payload: { projectId: string; walletAddres
   }
 }
 
-export async function executeSquadTransitionAction(payload: {
-  projectId: string; actorWallet: string; targetWallet: string; actionType: 'approve_app' | 'reject_app' | 'accept_invite' | 'reject_invite' | 'revoke_invite' | 'kick' | 'leave'; role: string; nonce: string; timestamp: number; signature: string;
+export async function executeSquadTransitionAction(input: {
+  projectId: string;
+  actorWallet: string;
+  targetWallet: string;
+  actionType: "approve_app" | "reject_app" | "accept_invite" | "reject_invite" | "revoke_invite" | "kick" | "leave";
+  nonce: string;
+  timestamp: number;
+  signature: string;
 }) {
   try {
-    const actor = new PublicKey(payload.actorWallet.trim()).toBase58();
-    const target = new PublicKey(payload.targetWallet.trim()).toBase58();
+    // 1. Base58 case-sensitive (Büyük/Küçük harf) yapısını bozmadan normalize et
+    const actor = new PublicKey(input.actorWallet.trim()).toBase58();
+    const target = new PublicKey(input.targetWallet.trim()).toBase58();
 
-    const expectedPayload: PumpMatchPayload = {
-      action: payload.actionType, chain: 'solana-mainnet', domain: 'pumpmatch-governance', env: ENV,
-      nonce: payload.nonce, project: payload.projectId, role: payload.role, target: target, timestamp: payload.timestamp, v: 1
-    };
+    // 2. V2 Canonical Payload (Role ve Env'den arındırılmış, deterministik yapı)
+    const expectedPayload = {
+      v: 2,
+      domain: "pumpmatch-governance",
+      chain: "solana-mainnet",
+      projectId: input.projectId.trim(),
+      actorWallet: actor,
+      targetWallet: target,
+      actionType: input.actionType,
+      nonce: input.nonce.trim(),
+      timestamp: Number(input.timestamp),
+    } as const;
 
-    const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(actor, payload.signature, expectedPayload);
-    if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature verification failed." };
+    // 3. Payload Zaman ve Şekil Doğrulaması (Future Skew & Expiry Koruması)
+    const pv = validateSquadTransitionPayloadV2(expectedPayload);
+    if (!pv.ok) return { success: false, message: pv.error };
 
-    const { data, error } = await supabaseAdmin.rpc('process_squad_transition', {
-      p_project_id: payload.projectId, p_actor: derivedActor, p_target: target, p_action: payload.actionType, p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
+    // 4. MÜKEMMEL KULLANIM: CANONICAL BYTES ÜRETİMİ
+    // Objeyi alfabetik sıraya dizer ve doğrudan saf Uint8Array (Byte) üretir
+    const messageBytes = generateCanonicalMessageV2(expectedPayload);
+
+    // 5. İMZA DOĞRULAMASI (String'e Çevirmeden!)
+    // Üretilen byte dizisini hiçbir encode/decode işlemine sokmadan doğrudan Nacl'a veriyoruz
+    const isSignatureValid = await verifyLegacySignature(actor, messageBytes, input.signature);
+
+    if (!isSignatureValid) {
+      return { success: false, message: "Signature verification failed. Tampered payload or invalid signature." };
+    }
+
+    // 6. SUPABASE RPC ÇAĞRISI (Governance Execution - v2)
+    // Rol ve diğer doğrulamalar SQL içindeki SECURITY DEFINER tarafından halledilir
+    const { data, error } = await supabaseAdmin.rpc("process_squad_transition_v2", {
+      p_project_id: expectedPayload.projectId,
+      p_actor: expectedPayload.actorWallet,
+      p_target: expectedPayload.targetWallet,
+      p_action: expectedPayload.actionType,
+      p_nonce: expectedPayload.nonce,
+      p_signature: input.signature,
+      p_timestamp: expectedPayload.timestamp,
     });
 
-    if (error) throw error;
-    return data;
+    if (error) {
+      // Replay Attack Guard (Aynı nonce tekrar kullanıldıysa UNIQUE CONSTRAINT patlar)
+      if (error.code === "23505") {
+        return { success: false, message: "Replay attack detected. Nonce already used." };
+      }
+      throw error;
+    }
+
+    return data ?? { success: true };
   } catch (err) {
     console.error("[Protocol Error - executeSquadTransitionAction]", err);
-    return { success: false, message: "Transition failed." };
+    return { success: false, message: "Governance transition failed due to internal error." };
   }
 }
-
 // app/actions/arena.ts dosyasının en altına eklenecek
 // Terminal states: historical records, never shown in active squad UI
 const TERMINAL_STATUSES = ['kicked', 'left', 'rejected', 'revoked'] as const;

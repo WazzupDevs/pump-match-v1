@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 import { ShieldCheck, XCircle, CheckCircle2, UserMinus, Clock, Users, ShieldAlert, Loader2, LogOut } from "lucide-react";
@@ -32,6 +32,7 @@ function maskWallet(address: string) {
 
 /**
  * CLIENT-SIDE CANONICALIZER
+ * Ensures JSON stringify order matches backend for Ed25519 signature verification
  */
 type CanonicalValue = string | number | boolean | null;
 function createCanonicalMessage(payload: Record<string, CanonicalValue>): Uint8Array {
@@ -43,7 +44,6 @@ function createCanonicalMessage(payload: Record<string, CanonicalValue>): Uint8A
   return new TextEncoder().encode(JSON.stringify(canonicalObject));
 }
 
-// 🔥 DİKKAT: Doğru Export Şekli (Süslü parantezli import için)
 export function SquadCommandCenter({
   projectId,
   isFounder,
@@ -56,29 +56,51 @@ export function SquadCommandCenter({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const { signMessage } = useWallet();
+  
+  const isMounted = useRef(true);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleTransition = async (targetWallet: string, actionType: ActionType, role: string, memberId: string) => {
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
+  const showError = (msg: string) => {
+    if (!isMounted.current) return;
+    setErrorMsg(msg);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => {
+      if (isMounted.current) setErrorMsg(null);
+    }, 4000);
+  };
+
+  const handleTransition = async (targetWallet: string, actionType: ActionType, memberId: string) => {
     if (!signMessage) {
-      setErrorMsg("Wallet not connected or doesn't support signing.");
+      showError("Wallet not connected or doesn't support signing.");
       return;
     }
 
     setProcessingId(memberId);
     setErrorMsg(null);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
 
     try {
-      const nonce = crypto.randomUUID();
+      // FIX: Browser uyumluluğu için fallback eklendi
+      const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).substring(2)}`;
       const timestamp = Date.now();
       
+      // FIX: Role ve Env çıkarıldı. Key'ler backend ile birebir aynı yapıldı.
       const payloadObj = {
-        action: actionType,
+        actionType: actionType,
+        actorWallet: currentUserWallet,
         chain: "solana-mainnet",
         domain: "pumpmatch-governance",
-        env: process.env.NODE_ENV === "production" ? "production" : "development",
         nonce: nonce,
-        project: projectId,
-        role: role,
-        target: targetWallet,
+        projectId: projectId,
+        targetWallet: targetWallet,
         timestamp: timestamp,
         v: 1
       };
@@ -91,22 +113,26 @@ export function SquadCommandCenter({
         actorWallet: currentUserWallet,
         targetWallet,
         actionType,
-        role,
         nonce,
         timestamp,
         signature: signatureBase58
       });
 
+      if (!isMounted.current) return;
+
       if (result.success) {
         onRefresh(); 
       } else {
-        setErrorMsg(result.message || "Protocol transition failed.");
+        showError(result.message || "Protocol transition failed.");
       }
     } catch (error) {
       console.error("Transition failed:", error);
-      setErrorMsg("Transaction rejected by user or network error.");
+      if (!isMounted.current) return;
+      showError("Transaction rejected by user or network error.");
     } finally {
-      setProcessingId(null);
+      if (isMounted.current) {
+        setProcessingId(null);
+      }
     }
   };
 
@@ -117,7 +143,6 @@ export function SquadCommandCenter({
 
   return (
     <div className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-      
       <div className="flex items-center border-b border-slate-800 bg-slate-900/80 px-4 pt-4 gap-6">
         <button
           onClick={() => setActiveTab("active")}
@@ -160,53 +185,56 @@ export function SquadCommandCenter({
       )}
 
       <div className="p-4 max-h-[50vh] overflow-y-auto">
-        {/* ================= ACTIVE SQUAD ================= */}
         {activeTab === "active" && (
           <div className="space-y-3">
             {activeMembers.length === 0 ? (
               <div className="text-center py-8 text-slate-500 text-sm">No active members yet.</div>
             ) : (
-              activeMembers.map(member => (
-                <div key={member.id} className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800/60 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                      <Users className="w-5 h-5 text-emerald-400" />
+              activeMembers.map(member => {
+                // FIX: Case-sensitive address checking for Base58
+                const isMe = member.wallet_address.trim() === currentUserWallet.trim();
+
+                return (
+                  <div key={member.id} className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800/60 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                        <Users className="w-5 h-5 text-emerald-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-mono text-slate-200">{maskWallet(member.wallet_address)}</p>
+                        <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">{member.role}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-mono text-slate-200">{maskWallet(member.wallet_address)}</p>
-                      <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">{member.role}</p>
+                    
+                    <div className="flex items-center gap-2">
+                      {isFounder && !isMe && (
+                        <button
+                          onClick={() => handleTransition(member.wallet_address, 'kick', member.id)}
+                          disabled={processingId !== null}
+                          className={`p-2 rounded-lg transition-colors group relative ${processingId === member.id ? "text-rose-400" : "text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"}`}
+                          title="Kick Member"
+                        >
+                          {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserMinus className="w-4 h-4" />}
+                        </button>
+                      )}
+                      {!isFounder && isMe && (
+                        <button
+                          onClick={() => handleTransition(member.wallet_address, 'leave', member.id)}
+                          disabled={processingId !== null}
+                          className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"}`}
+                        >
+                          {processingId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+                          Leave Squad
+                        </button>
+                      )}
                     </div>
                   </div>
-                  
-                  <div className="flex items-center gap-2">
-                    {isFounder && member.wallet_address.toLowerCase() !== currentUserWallet.toLowerCase() && (
-                      <button
-                        onClick={() => handleTransition(member.wallet_address, 'kick', member.role, member.id)}
-                        disabled={processingId !== null}
-                        className={`p-2 rounded-lg transition-colors group relative ${processingId === member.id ? "text-rose-400" : "text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"}`}
-                        title="Kick Member"
-                      >
-                        {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserMinus className="w-4 h-4" />}
-                      </button>
-                    )}
-                    {!isFounder && member.wallet_address.toLowerCase() === currentUserWallet.toLowerCase() && (
-                      <button
-                        onClick={() => handleTransition(member.wallet_address, 'leave', member.role, member.id)}
-                        disabled={processingId !== null}
-                        className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"}`}
-                      >
-                        {processingId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
-                        Leave Squad
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
 
-        {/* ================= PENDING REQUESTS ================= */}
         {activeTab === "pending" && (
           <div className="space-y-3">
             {pendingRequests.length === 0 ? (
@@ -215,7 +243,9 @@ export function SquadCommandCenter({
               pendingRequests.map(member => {
                 const isApplication = member.status === 'pending_application';
                 const isInvite = member.status === 'pending_invite';
-                const isMe = member.wallet_address.toLowerCase() === currentUserWallet.toLowerCase();
+                
+                // FIX: Case-sensitive strict equality for Base58
+                const isMe = member.wallet_address.trim() === currentUserWallet.trim();
 
                 const canApproveApp = isFounder && isApplication;
                 const canRevokeInvite = isFounder && isInvite;
@@ -246,27 +276,27 @@ export function SquadCommandCenter({
                     <div className="flex items-center gap-2">
                       {canApproveApp && (
                         <>
-                          <button onClick={() => handleTransition(member.wallet_address, 'reject_app', member.role, member.id)} disabled={processingId !== null} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors">
+                          <button onClick={() => handleTransition(member.wallet_address, 'reject_app', member.id)} disabled={processingId !== null} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors">
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                           </button>
-                          <button onClick={() => handleTransition(member.wallet_address, 'approve_app', member.role, member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"}`}>
+                          <button onClick={() => handleTransition(member.wallet_address, 'approve_app', member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"}`}>
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Approve
                           </button>
                         </>
                       )}
 
                       {canRevokeInvite && (
-                        <button onClick={() => handleTransition(member.wallet_address, 'revoke_invite', member.role, member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"}`}>
+                        <button onClick={() => handleTransition(member.wallet_address, 'revoke_invite', member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"}`}>
                           {processingId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />} Revoke Invite
                         </button>
                       )}
 
                       {canAcceptInvite && (
                         <>
-                          <button onClick={() => handleTransition(member.wallet_address, 'reject_invite', member.role, member.id)} disabled={processingId !== null} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors">
+                          <button onClick={() => handleTransition(member.wallet_address, 'reject_invite', member.id)} disabled={processingId !== null} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors">
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                           </button>
-                          <button onClick={() => handleTransition(member.wallet_address, 'accept_invite', member.role, member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-blue-400 border-blue-500/30 hover:bg-blue-500/10"}`}>
+                          <button onClick={() => handleTransition(member.wallet_address, 'accept_invite', member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-blue-400 border-blue-500/30 hover:bg-blue-500/10"}`}>
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Accept Invite
                           </button>
                         </>
