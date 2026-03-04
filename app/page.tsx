@@ -1,1524 +1,394 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
-import {
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { Fish, Dice5, Waves, Bot, History, Sparkles, Lock, X, Users, Wallet, Layers, Activity, AlertTriangle, Scan, Calendar, SlidersHorizontal, Code, Rocket, DollarSign, BadgeCheck, SearchX, ShieldCheck, Zap } from "lucide-react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import bs58 from "bs58";
-import { analyzeWallet, getNetworkMatches, getUserAction, searchNetworkAction, endorseUserAction } from "@/app/actions/analyzeWallet";
-import type { MatchProfile, NetworkAgent, SearchFilters, UserIntent, UserProfile, WalletAnalysis } from "@/types";
-import { MatchCard } from "@/components/match-card";
-import { JoinNetworkModal } from "@/components/JoinNetworkModal";
-import { ArenaLeaderboard } from "@/components/ArenaLeaderboard";
-import { WalletButton } from "@/components/ui/wallet-button";
-import { FilterSheet } from "@/components/ui/filter-sheet";
+import Link from "next/link";
+import { Logo } from "@/components/ui/logo";
 import { Navbar } from "@/components/ui/navbar";
-import { ShareBar } from "@/components/profile/ShareBar";
+import { Web3LoginButton } from "@/components/auth/Web3LoginButton";
+import {
+  BarChart3,
+  Swords,
+  Users,
+  ShieldCheck,
+  Zap,
+  ArrowRight,
+  Star,
+  TrendingUp,
+  Sparkles,
+} from "lucide-react";
 
-function formatAddress(address: string) {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 4)}...${address.slice(-4)}`;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Data
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ──────────────────────────────────────────────────────────────
-// Skeleton loaders — pure Tailwind, no extra deps
-// ──────────────────────────────────────────────────────────────
+const STATS = [
+  { value: "1,337+", label: "Wallets Analyzed" },
+  { value: "500+",   label: "Network Agents"   },
+  { value: "98+",    label: "Squads Formed"     },
+  { value: "99.1%",  label: "Trust Accuracy"   },
+];
 
-function AnalysisSkeleton() {
-  return (
-    <div className="mx-auto max-w-3xl rounded-3xl border border-slate-800 bg-slate-950/80 p-6 md:p-8 animate-pulse">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-slate-800" />
-          <div className="space-y-2">
-            <div className="h-2.5 w-36 rounded bg-slate-800" />
-            <div className="h-4 w-52 rounded bg-slate-800" />
-          </div>
-        </div>
-        <div className="h-5 w-16 rounded-full bg-slate-800" />
-      </div>
-      <div className="mt-6 grid gap-6 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-5">
-          <div className="flex flex-col items-center gap-5">
-            <div className="h-36 w-36 rounded-full bg-slate-800" />
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="space-y-1.5">
-                  <div className="h-2 w-16 rounded bg-slate-800" />
-                  <div className="h-4 w-12 rounded bg-slate-800" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="space-y-4">
-          <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-            <div className="grid grid-cols-2 gap-3">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="rounded-xl border border-slate-800 px-3 py-2 space-y-1.5">
-                  <div className="h-2 w-20 rounded bg-slate-800" />
-                  <div className="h-4 w-14 rounded bg-slate-800" />
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 h-36 flex items-end pb-4">
-            <div className="h-1.5 w-full rounded-full bg-slate-800" />
-          </div>
-        </div>
-      </div>
-      <div className="mt-5 h-12 rounded-xl bg-slate-800" />
-    </div>
-  );
-}
+const FEATURES = [
+  {
+    icon:     BarChart3,
+    accent:   "cyan",
+    iconBg:   "bg-cyan-500/10",
+    iconColor:"text-cyan-400",
+    border:   "hover:border-cyan-500/30",
+    glow:     "from-cyan-500/6",
+    badge:    "On-Chain Intel",
+    title:    "Wallet Analysis",
+    desc:     "Deep-dive into PnL, win rates, Pump.fun DNA, jeet scores, and token diversity. Your on-chain CV, fully decoded.",
+    bullets:  ["Pump.fun trading DNA", "Jeet & rug-magnet metrics", "Token diversity score"],
+  },
+  {
+    icon:     Swords,
+    accent:   "amber",
+    iconBg:   "bg-amber-500/10",
+    iconColor:"text-amber-400",
+    border:   "hover:border-amber-500/30",
+    glow:     "from-amber-500/6",
+    badge:    "Season 1 Live",
+    title:    "Arena Leaderboards",
+    desc:     "Compete with the sharpest wallets on Solana. Climb tiers from Newbie to Legendary and prove your edge.",
+    bullets:  ["Real-time trust rankings", "Tier-based progression", "Season rewards & badges"],
+  },
+  {
+    icon:     Users,
+    accent:   "violet",
+    iconBg:   "bg-violet-500/10",
+    iconColor:"text-violet-400",
+    border:   "hover:border-violet-500/30",
+    glow:     "from-violet-500/6",
+    badge:    "Alpha Protocol",
+    title:    "Squads",
+    desc:     "Match with verified devs, whales, and builders. Form squads, pool alpha, and dominate launches together.",
+    bullets:  ["AI-powered match scoring", "Role-based squad assembly", "On-chain endorsements"],
+  },
+];
 
-function MatchCardSkeleton() {
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-5 animate-pulse">
-      <div className="flex items-start gap-3 mb-4">
-        <div className="h-12 w-12 rounded-full bg-slate-800 flex-shrink-0" />
-        <div className="flex-1 space-y-2 pt-1">
-          <div className="h-4 w-28 rounded bg-slate-800" />
-          <div className="h-3 w-16 rounded-full bg-slate-800" />
-        </div>
-        <div className="h-7 w-12 rounded-lg bg-slate-800" />
-      </div>
-      <div className="mb-4 space-y-1.5">
-        <div className="flex justify-between items-center">
-          <div className="h-2 w-20 rounded bg-slate-800" />
-          <div className="h-4 w-10 rounded bg-slate-800" />
-        </div>
-        <div className="h-1.5 w-full rounded-full bg-slate-800" />
-      </div>
-      <div className="flex gap-1.5 mb-4">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-5 w-16 rounded bg-slate-800" />
-        ))}
-      </div>
-      <div className="space-y-1.5 mb-4">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-6 w-full rounded-md bg-slate-800" />
-        ))}
-      </div>
-      <div className="h-10 w-full rounded-lg bg-slate-800" />
-    </div>
-  );
-}
+const HOW_IT_WORKS = [
+  {
+    step: "01",
+    icon:  ShieldCheck,
+    color: "text-emerald-400",
+    bg:    "bg-emerald-500/10 border-emerald-500/20",
+    title: "Connect Your Wallet",
+    desc:  "Sign in with Phantom in one click. No email. No password. Your wallet is your identity.",
+  },
+  {
+    step: "02",
+    icon:  Zap,
+    color: "text-cyan-400",
+    bg:    "bg-cyan-500/10 border-cyan-500/20",
+    title: "Scan Your DNA",
+    desc:  "We analyse your on-chain history, Pump.fun trades, and token activity to compute your Trust Score.",
+  },
+  {
+    step: "03",
+    icon:  Sparkles,
+    color: "text-violet-400",
+    bg:    "bg-violet-500/10 border-violet-500/20",
+    title: "Match & Dominate",
+    desc:  "Get matched with wallets that complement your strengths. Build your squad and enter the Arena.",
+  },
+];
 
-function formatWalletAge(days: number | undefined): string {
-  if (days == null) return "Unknown";
-  if (days < 1) return "< 1 day";
-  if (days < 30) return `${days} days`;
-  if (days < 365) return `${Math.floor(days / 30)} months`;
-  return `${(days / 365).toFixed(1)} years`;
-}
-
-function formatHoldTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "—";
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h`;
-  return `${(seconds / 86400).toFixed(1)}d`;
-}
-
-// ──────────────────────────────────────────────────────────────
-// Join Network modal: persist "Skip / Cancel" per wallet so we don't auto-open again
-// ──────────────────────────────────────────────────────────────
-const getSkipJoinKey = (walletAddress: string) =>
-  `pumpmatch_skip_join_${walletAddress}`;
-
-function getSkipJoinFlag(walletAddress: string): boolean {
-  if (typeof window === "undefined") return false;
-  return localStorage.getItem(getSkipJoinKey(walletAddress)) === "true";
-}
-
-const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+// ─────────────────────────────────────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { publicKey, connected, signMessage } = useWallet();
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [loadingPhase, setLoadingPhase] = useState<string>(""); // Cool loading feedback
-  const [error, setError] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<WalletAnalysis | null>(null);
-  const [matches, setMatches] = useState<MatchProfile[]>([]);
-  // v2: Intent Layer - Onboarding Modal State
-  const [showIntentModal, setShowIntentModal] = useState(false);
-  const [userIntent, setUserIntent] = useState<UserIntent | null>(null);
-  // Opt-In Network Architecture - Join Network Modal State
-  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
-  const hasAutoOpenedJoinModalRef = useRef(false);
-  // God Mode Discovery - Filter & Search
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [searchResults, setSearchResults] = useState<NetworkAgent[] | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  // Persistent User Sessions - Auto-sync on wallet connect
-  const [isSyncing, setIsSyncing] = useState(false);
-  // Cached user profile for edit modal pre-fill
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  // Network Dopamine Layer - Success toast
-  const [toast, setToast] = useState<string | null>(null);
-
-  // Sahiplik kontrolü: Sadece bağlı cüzdan analiz edilen cüzdanla aynıysa Paylaşım + DNA açılır
-  const connectedAddress = publicKey?.toBase58();
-  const isOwner = Boolean(analysis && connectedAddress === analysis.address);
-
-  // 1. ZIRH: Component Unmount (Sayfa değiştirme) durumunda state update sızıntısını önler
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // 2. ZIRH: Çift tıklama (Double-click) engeli için referans
-  const endorseInFlight = useRef<Set<string>>(new Set());
-
-  // Auto-dismiss toast after 5 seconds
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 5000);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
-  // Reset auto-open ref when wallet changes so a new wallet gets one auto-open chance
-  useEffect(() => {
-    hasAutoOpenedJoinModalRef.current = false;
-  }, [publicKey?.toBase58()]);
-
-  // Auto-open Join modal when we have analysis + not registered, unless user previously skipped (per wallet)
-  useEffect(() => {
-    if (!publicKey || !analysis || analysis.isRegistered) return;
-    const addr = publicKey.toBase58();
-    if (getSkipJoinFlag(addr)) return;
-    if (hasAutoOpenedJoinModalRef.current) return;
-    hasAutoOpenedJoinModalRef.current = true;
-    setIsJoinModalOpen(true);
-  }, [analysis?.address, analysis?.isRegistered, publicKey?.toBase58()]);
-
-  // ── Endorsement: Sign + call endorseUserAction ──
-  const handleEndorse = useCallback(
-    async (targetAddress: string): Promise<{ success: boolean; message: string; alreadyEndorsed?: boolean }> => {
-      if (!publicKey || !signMessage) {
-        return { success: false, message: "Wallet not connected." };
-      }
-      const fromWallet = publicKey.toBase58();
-      try {
-        const message = `Pump Match Endorse\nTarget: ${targetAddress}\nFrom: ${fromWallet}\nTimestamp: ${Date.now()}`;
-        const messageBytes = new TextEncoder().encode(message);
-        const signatureBytes = await signMessage(messageBytes);
-        const signature = bs58.encode(signatureBytes);
-        const result = await endorseUserAction(fromWallet, targetAddress, { message, signature });
-        if (result.success && !result.alreadyEndorsed) {
-          setToast(`Endorsed! ${result.message}`);
-        }
-        return result;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Endorsement failed.";
-        return { success: false, message: msg };
-      }
-    },
-    [publicKey, signMessage],
-  );
-
-  // 3. ZIRH: Promise hatalarını yutmayan ve Unmount kontrolü yapan Endorse sarmalayıcısı
-  const safeEndorse = useCallback(async (addr: string) => {
-    if (endorseInFlight.current.has(addr)) return;
-    endorseInFlight.current.add(addr);
-    try {
-      await handleEndorse(addr);
-    } catch (error) {
-      if (mountedRef.current) {
-        setToast("Endorsement failed. Please try again.");
-      }
-    } finally {
-      endorseInFlight.current.delete(addr);
-    }
-  }, [handleEndorse]);
-
-  // UI Yetki Sınırları
-  const trust = analysis?.trustScore ?? 0;
-  const canWrite = trust >= 50;
-  const canEndorse = canWrite && analysis?.isRegistered;
-  const canConnect = canWrite && analysis?.isRegistered;
-
-  // ──────────────────────────────────────────────────────────────
-  // Persistent User Sessions: Auto-fetch user profile on wallet connect
-  // ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    // Reset state when wallet disconnects
-    if (!connected || !publicKey) {
-      setAnalysis(null);
-      setMatches([]);
-      setQuery("");
-      setIsSyncing(false);
-      setUserProfile(null);
-      return;
-    }
-
-    // When wallet connects, check if user exists in DB
-    const checkUserSession = async () => {
-      const walletAddress = publicKey.toBase58();
-      
-      // Don't sync if we already have analysis for this address
-      // Note: We check analysis?.address which may be stale, but that's okay
-      // because we only want to prevent re-syncing the same address
-      if (analysis?.address === walletAddress) {
-        return;
-      }
-
-      setIsSyncing(true);
-      try {
-        const userProfile = await getUserAction(walletAddress);
-        if (userProfile) setUserProfile(userProfile);
-
-        if (userProfile) {
-          // User exists: Automatically show their dashboard (skip landing)
-          setQuery(walletAddress);
-          // Call handleAnalyze directly with the address
-          const address = walletAddress.trim();
-          setError(null);
-          setLoading(true);
-          setLoadingPhase("Restoring session...");
-
-          try {
-            const response = await analyzeWallet(address, userIntent || undefined);
-            const walletAnalysis = response.walletAnalysis;
-            
-            if (!userIntent) {
-              const skipKey = `pumpmatch_skip_intent_${walletAddress}`;
-              if (typeof window !== "undefined" && localStorage.getItem(skipKey) !== "true") {
-                setShowIntentModal(true);
-              }
-            }
-            
-            setAnalysis(walletAnalysis);
-            
-            // Opt-In Network Architecture - If registered, fetch network matches
-            if (walletAnalysis.isRegistered) {
-              setLoadingPhase("Fetching Network Matches...");
-              try {
-                const networkMatches = await getNetworkMatches(walletAnalysis.address, walletAnalysis);
-                setMatches(networkMatches);
-              } catch (err) {
-                // eslint-disable-next-line no-console
-                console.error("Failed to fetch network matches:", err);
-                setMatches(response.matches); // Fallback to mock matches
-              }
-            } else {
-              setMatches(response.matches);
-            }
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error(err);
-            const errorMsg = err instanceof Error ? err.message : "An error occurred during analysis.";
-            setError(errorMsg);
-            setAnalysis(null);
-            setMatches([]);
-          } finally {
-            setLoading(false);
-            setLoadingPhase("");
-          }
-        } else {
-          // User doesn't exist: Stay on landing page (allow manual Analyze)
-          // No action needed - user can click "Analyze My Wallet" manually
-        }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error("[Persistent Session] Failed to fetch user profile:", error);
-        // On error, stay on landing page
-      } finally {
-        setIsSyncing(false);
-      }
-    };
-
-    checkUserSession();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected, publicKey?.toBase58()]); // Only run when wallet connection state changes
-
-  const activityChartData = useMemo(() => {
-    if (!analysis) return [];
-
-    const points = [
-      { label: "Score", score: analysis.score },
-      { label: "Assets", score: Math.min(100, analysis.assetCount) },
-      { label: "Tokens", score: Math.min(100, analysis.tokenCount * 2) },
-    ];
-
-    return points;
-  }, [analysis]);
-
-  const handleAnalyze = useCallback(
-    async (addressOverride?: string) => {
-      const address = (addressOverride ?? query).trim();
-      if (!address) {
-        setError("Please enter a wallet address.");
-        return;
-      }
-      if (!BASE58_RE.test(address)) {
-        setError("Invalid Solana address format.");
-        return;
-      }
-
-      setError(null);
-      setLoading(true);
-      setLoadingPhase("Analyzing...");
-
-      try {
-        const response = await analyzeWallet(address, userIntent || undefined);
-        const walletAnalysis = response.walletAnalysis;
-
-        if (!userIntent) {
-          const walletAddress = publicKey?.toBase58();
-          const skipKey = walletAddress ? `pumpmatch_skip_intent_${walletAddress}` : null;
-          if (
-            !skipKey ||
-            (typeof window !== "undefined" && localStorage.getItem(skipKey) !== "true")
-          ) {
-            setShowIntentModal(true);
-          }
-        }
-
-        setAnalysis(walletAnalysis);
-
-        if (walletAnalysis.isRegistered) {
-          setLoadingPhase("Fetching Network Matches...");
-          try {
-            const networkMatches = await getNetworkMatches(
-              walletAnalysis.address,
-              walletAnalysis,
-            );
-            setMatches(networkMatches);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error("Failed to fetch network matches:", err);
-            setMatches(response.matches);
-          }
-        } else {
-          setMatches(response.matches);
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(err);
-        const errorMsg =
-          err instanceof Error ? err.message : "An error occurred during analysis.";
-        setError(errorMsg);
-        setAnalysis(null);
-        setMatches([]);
-      } finally {
-        setLoading(false);
-        setLoadingPhase("");
-      }
-    },
-    [query, userIntent, publicKey],
-  );
-
-  // Handle "Analyze My Wallet" when wallet is connected
-  const handleAnalyzeMyWallet = useCallback(() => {
-    if (publicKey) {
-      const walletAddress = publicKey.toBase58();
-      setQuery(walletAddress);
-      handleAnalyze(walletAddress);
-    }
-  }, [publicKey, handleAnalyze]);
-
-  // God Mode Discovery: Search Network with filters
-  const handleSearchNetwork = useCallback(async (filters: SearchFilters) => {
-    setIsSearching(true);
-    try {
-      const results = await searchNetworkAction(filters);
-      setSearchResults(results);
-      setFilterOpen(false);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Search failed:", err);
-      setSearchResults([]);
-      setFilterOpen(false);
-    } finally {
-      setIsSearching(false);
-    }
-  }, []);
-
-  // God Mode Discovery: Click on agent card -> analyze their wallet
-  const handleAgentClick = useCallback((agent: NetworkAgent) => {
-    setSearchResults(null); // Clear search results
-    setQuery(agent.address);
-    handleAnalyze(agent.address);
-  }, [handleAnalyze]);
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans">
-      {/* TOP NAVIGATION BAR */}
+    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans overflow-x-hidden">
+
+      {/* ── Navbar ─────────────────────────────────────────────────────────── */}
       <Navbar>
-        <WalletButton />
+        <Link
+          href="/command-center"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-400 border border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/15 transition-all"
+        >
+          Command Center
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </Navbar>
 
-      {/* Network Dopamine Layer: Success Toast */}
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-md w-[calc(100%-2rem)] animate-in slide-in-from-bottom-4 fade-in duration-300">
-          <div className="flex items-center gap-3 rounded-xl border border-emerald-500/40 bg-zinc-900/95 backdrop-blur-lg px-4 py-3 shadow-xl shadow-emerald-500/10">
-            <span className="text-lg flex-shrink-0">🚀</span>
-            <p className="text-sm text-slate-200 leading-snug flex-1">{toast}</p>
-            <button
-              type="button"
-              onClick={() => setToast(null)}
-              className="flex-shrink-0 rounded-full p-1 text-slate-500 hover:text-slate-200 transition-colors"
-              aria-label="Dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
+      {/* ── Ambient background ─────────────────────────────────────────────── */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        {/* Grid pattern */}
+        <div
+          className="absolute inset-0 opacity-[0.025]"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(16,185,129,1) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,1) 1px, transparent 1px)",
+            backgroundSize: "60px 60px",
+          }}
+        />
+        {/* Glow blobs */}
+        <div className="absolute top-1/4 left-1/4 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500/8 blur-[120px]" />
+        <div className="absolute top-1/3 right-1/4 h-[400px] w-[400px] rounded-full bg-violet-500/6 blur-[100px]" />
+        <div className="absolute bottom-1/4 left-1/2 h-[300px] w-[300px] -translate-x-1/2 rounded-full bg-cyan-500/5 blur-[80px]" />
+      </div>
+
+      <main className="relative">
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* HERO                                                               */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        <section className="flex min-h-screen flex-col items-center justify-center px-4 pt-20 pb-16 text-center">
+
+          {/* Tag */}
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/8 px-4 py-1.5 text-xs font-semibold text-emerald-400 uppercase tracking-widest">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            </span>
+            The On-Chain Matchmaking Engine · Solana
           </div>
-        </div>
-      )}
 
-      {/* Persistent User Sessions: Syncing Indicator */}
-      {isSyncing && (
-        <div className="fixed top-20 right-4 md:top-24 md:right-6 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-500/30 bg-slate-900/90 backdrop-blur-sm shadow-lg shadow-emerald-500/10">
-          <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs text-emerald-400/80 font-medium">Syncing...</span>
-        </div>
-      )}
-
-      <main className="w-full max-w-5xl mx-auto px-4 pt-24 pb-16 md:pt-28 md:pb-24">
-        {/* HERO SECTION */}
-        <div className="flex flex-col items-center text-center gap-6">
-          <p className="text-xs uppercase tracking-[0.3em] text-emerald-400/70">
-            The on-chain matchmaking engine for the Pump.fun ecosystem.
-          </p>
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-semibold leading-tight">
-            <span className="bg-gradient-to-r from-emerald-400 via-emerald-300 to-purple-400 bg-clip-text text-transparent drop-shadow-[0_0_25px_rgba(16,185,129,0.55)]">
-              Find Your Perfect Squad
+          {/* Headline */}
+          <h1 className="mx-auto max-w-4xl text-5xl font-black leading-[1.07] tracking-tight sm:text-6xl lg:text-7xl">
+            <span className="bg-gradient-to-br from-emerald-300 via-emerald-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_40px_rgba(16,185,129,0.4)]">
+              Find Your Perfect
             </span>
             <br />
-            <span className="text-slate-200/90">on Solana</span>
+            <span className="text-slate-100">Squad on Solana</span>
           </h1>
-          <p className="max-w-xl text-sm md:text-base text-slate-400">
+
+          {/* Subtitle */}
+          <p className="mx-auto mt-6 max-w-xl text-base text-slate-400 leading-relaxed sm:text-lg">
             Match with verified devs, whales, and early adopters. Score
-            trustworthiness and build your dream squad on-chain.
+            trustworthiness and build your dream team using real on-chain data.
           </p>
 
-          {/* CONNECTED WALLET: "Analyze My Wallet" CTA */}
-          {connected && publicKey && !analysis && (
-            <button
-              type="button"
-              onClick={handleAnalyzeMyWallet}
-              disabled={loading}
-              className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-6 py-3 text-base font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-lg shadow-emerald-500/30"
+          {/* CTA cluster */}
+          <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
+            <Web3LoginButton size="lg" />
+            <Link
+              href="/command-center"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700/60 bg-slate-900/50 px-6 py-4 text-sm font-semibold text-slate-300 hover:border-slate-600 hover:text-white transition-all backdrop-blur-xl"
             >
-              <Scan className="h-5 w-5" />
-              {loading ? "Scanning..." : "Analyze My Wallet"}
-            </button>
-          )}
-
-          {/* SEARCH INPUT */}
-          <div className="mt-4 w-full max-w-2xl">
-            <div className="relative group">
-              <div className="absolute -inset-px rounded-full bg-gradient-to-r from-emerald-500/70 via-emerald-400/70 to-purple-500/70 opacity-70 blur-xl group-hover:opacity-100 transition-opacity duration-300" />
-              <div className="relative flex items-center gap-3 rounded-full border border-emerald-500/60 bg-slate-900/80 px-6 py-4 shadow-[0_0_40px_rgba(34,197,94,0.35)] backdrop-blur">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-400/60 bg-slate-900/80 text-emerald-300 text-sm">
-                  🔍
-                </span>
-                <input
-                  type="search"
-                  placeholder={connected ? "Or search any wallet address..." : "Search by Wallet Address..."}
-                  className="w-full bg-transparent text-base md:text-lg placeholder:text-slate-500 focus:outline-none"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") handleAnalyze();
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => handleAnalyze()}
-                  disabled={loading}
-                  className="hidden md:inline-flex items-center justify-center rounded-full bg-emerald-500 px-5 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                >
-                  {loading ? "Analyzing..." : "Analyze"}
-                </button>
-                {/* God Mode Discovery: Filter Button */}
-                <button
-                  type="button"
-                  onClick={() => setFilterOpen(true)}
-                  className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-800/80 p-2.5 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/40 transition-colors"
-                  title="Discovery Filters"
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <p className="mt-3 text-[11px] md:text-xs text-slate-500 text-left">
-              {connected
-                ? "Connected. Use the button above or search any address."
-                : "Connect your wallet or paste any Solana address."}
-            </p>
-
-            {/* Loading Phase Indicator */}
-            {loading && loadingPhase && (
-              <div className="mt-4 flex items-center gap-3 justify-center">
-                <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                <p className="text-sm text-emerald-400/80 font-medium animate-pulse">
-                  {loadingPhase}
-                </p>
-              </div>
-            )}
-
-            {/* Error Card (graceful, not just text) */}
-            {error && !loading && (
-              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 text-rose-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-rose-300">Analysis Failed</p>
-                  <p className="text-xs text-rose-400/70 mt-1">{error}</p>
-                  <button
-                    onClick={() => { setError(null); handleAnalyze(); }}
-                    className="mt-2 text-xs text-rose-300 underline underline-offset-2 hover:text-rose-200 transition-colors"
-                  >
-                    Try again
-                  </button>
-                </div>
-              </div>
-            )}
+              View Dashboard
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
-        </div>
 
-        {/* GOD MODE DISCOVERY: Search Results Grid */}
-        {searchResults !== null && (
-          <section className="mt-12 md:mt-16">
-            <div className="mx-auto max-w-5xl">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-emerald-400/70 mb-1">
-                    Discovery
-                  </p>
-                  <h2 className="text-xl md:text-2xl font-semibold text-slate-100">
-                    <span className="bg-gradient-to-r from-emerald-400 to-sky-400 bg-clip-text text-transparent">
-                      Network Agents
-                    </span>
-                    <span className="ml-2 text-sm font-normal text-slate-500">
-                      ({searchResults.length})
-                    </span>
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSearchResults(null)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/50 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                  Clear
-                </button>
-              </div>
+          <p className="mt-5 text-xs text-slate-600">
+            No email required · Sign in with Phantom · Your keys, your identity
+          </p>
 
-              {searchResults.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {searchResults.map((agent) => (
-                    <AgentMicroCard
-                      key={agent.id}
-                      agent={agent}
-                      onClick={() => handleAgentClick(agent)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                /* Empty State */
-                <div className="mx-auto max-w-md rounded-2xl border border-slate-700/40 bg-slate-900/50 p-10 text-center">
-                  <div className="inline-flex items-center justify-center w-14 h-14 rounded-full border border-slate-700/50 bg-slate-800/30 mb-4">
-                    <SearchX className="h-6 w-6 text-slate-600" />
-                  </div>
-                  <p className="text-sm text-slate-400 font-medium">
-                    No degens found matching this criteria.
-                  </p>
-                  <p className="text-xs text-slate-600 mt-2">
-                    Try lowering the trust score or removing some filters.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setFilterOpen(true)}
-                    className="mt-4 inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
-                  >
-                    <SlidersHorizontal className="h-3 w-3" />
-                    Adjust Filters
-                  </button>
-                </div>
-              )}
+          {/* Trust strip */}
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-slate-600">
+            {["Powered by Solana", "Secured by Supabase", "PKCE Auth", "Non-custodial"].map((t) => (
+              <span key={t} className="flex items-center gap-1.5">
+                <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                {t}
+              </span>
+            ))}
+          </div>
+
+          {/* Scroll indicator */}
+          <div className="mt-20 flex flex-col items-center gap-2 opacity-40">
+            <div className="h-8 w-5 rounded-full border border-slate-700 flex items-start justify-center pt-1.5">
+              <div className="h-1.5 w-1 rounded-full bg-slate-400 animate-bounce" />
             </div>
-          </section>
-        )}
+          </div>
+        </section>
 
-        {/* ANALYSIS SKELETON — shows while loading (before analysis resolves) */}
-        {loading && !analysis && !searchResults && (
-          <section className="mt-12 md:mt-16">
-            <AnalysisSkeleton />
-          </section>
-        )}
-
-        {/* ANALYSIS */}
-        {analysis && !searchResults && (
-          <section className="mt-12 md:mt-16">
-            <div className={`mx-auto max-w-3xl rounded-3xl border bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/90 p-6 md:p-8 ${
-              analysis.isRegistered
-                ? "border-emerald-500/40 shadow-[0_0_60px_rgba(34,197,94,0.55)] animate-[pulse_3s_ease-in-out_infinite]"
-                : "border-emerald-500/25 shadow-[0_0_60px_rgba(34,197,94,0.45)] shadow-emerald-500/30"
-            }`}>
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-emerald-500/10 border border-emerald-400/70 flex items-center justify-center">
-                    <Zap className="h-4 w-4 text-emerald-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                      ON-CHAIN ACTIVITY SCORE
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm text-slate-300">
-                        {formatAddress(analysis.address)}
-                      </p>
-                      {analysis.isRegistered && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-                          <ShieldCheck className="h-3 w-3" />
-                          Verified Agent
-                        </span>
-                      )}
-                    </div>
-                  </div>
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* STATS STRIP                                                        */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        <section className="border-y border-slate-800/60 bg-slate-900/30 backdrop-blur-xl">
+          <div className="mx-auto max-w-5xl px-4 py-6">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {STATS.map((s) => (
+                <div key={s.label} className="flex flex-col items-center gap-0.5 text-center">
+                  <span className="text-2xl font-black text-emerald-400 tabular-nums">
+                    {s.value}
+                  </span>
+                  <span className="text-[11px] uppercase tracking-widest text-slate-600">
+                    {s.label}
+                  </span>
                 </div>
-                <span className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-[10px] font-semibold tracking-wide text-green-400">
-                  LIVE DATA
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* FEATURES                                                           */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        <section className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
+          <div className="text-center mb-14">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-emerald-500">
+              Core Features
+            </p>
+            <h2 className="text-3xl font-black text-slate-100 sm:text-4xl">
+              Everything you need to{" "}
+              <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                dominate on-chain
+              </span>
+            </h2>
+            <p className="mx-auto mt-4 max-w-lg text-slate-500 text-sm leading-relaxed">
+              Three powerful systems working together to analyse, rank, and match
+              the sharpest wallets in the Pump.fun ecosystem.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+            {FEATURES.map((f) => {
+              const Icon = f.icon;
+              return (
+                <div
+                  key={f.title}
+                  className={`relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl p-6 transition-all duration-300 ${f.border} group`}
+                >
+                  {/* Card glow */}
+                  <div className={`absolute inset-0 bg-gradient-to-br ${f.glow} via-transparent to-transparent pointer-events-none`} />
+
+                  {/* Badge */}
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className={`p-2.5 rounded-xl ${f.iconBg}`}>
+                      <Icon className={`h-5 w-5 ${f.iconColor}`} />
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase tracking-widest ${f.iconColor} opacity-70`}>
+                      {f.badge}
+                    </span>
+                  </div>
+
+                  {/* Content */}
+                  <h3 className="text-lg font-black text-slate-100 mb-2">{f.title}</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed mb-5">{f.desc}</p>
+
+                  {/* Bullets */}
+                  <ul className="space-y-2">
+                    {f.bullets.map((b) => (
+                      <li key={b} className="flex items-center gap-2 text-xs text-slate-400">
+                        <div className={`h-1 w-1 rounded-full flex-shrink-0 ${f.iconColor}`} />
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* Bottom border flash on hover */}
+                  <div className={`absolute bottom-0 inset-x-0 h-0.5 bg-gradient-to-r from-transparent ${f.iconColor.replace("text-", "via-")} to-transparent scale-x-0 group-hover:scale-x-100 transition-transform duration-500`} />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* HOW IT WORKS                                                       */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        <section className="border-t border-slate-800/50 bg-slate-900/20">
+          <div className="mx-auto max-w-5xl px-4 py-24 sm:py-32">
+            <div className="text-center mb-14">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-cyan-500">
+                How It Works
+              </p>
+              <h2 className="text-3xl font-black text-slate-100 sm:text-4xl">
+                From wallet to squad in{" "}
+                <span className="bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent">
+                  three steps
                 </span>
-              </div>
+              </h2>
+            </div>
 
-              {analysis && isOwner && (
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 mt-8 p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
-                  <div>
-                    <h3 className="text-lg font-semibold text-emerald-400">Your On-Chain CV is Ready!</h3>
-                    <p className="text-sm text-slate-400">Share your public profile to flex your stats or get endorsements.</p>
-                  </div>
-                  <ShareBar
-                    address={analysis.address}
-                    trustScore={analysis.trustScore}
-                    profileUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/profile/${analysis.address}`}
-                  />
-                </div>
-              )}
+            <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
+              {/* Connector line (desktop only) */}
+              <div className="absolute top-10 left-[calc(16.67%+1rem)] right-[calc(16.67%+1rem)] h-px bg-gradient-to-r from-emerald-500/30 via-cyan-500/30 to-violet-500/30 hidden md:block pointer-events-none" />
 
-              <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.2fr)] items-start">
-                {/* TRUST SCORE HERO CARD */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-6 shadow-lg shadow-emerald-500/20">
-                  <div className="flex flex-col items-center gap-6 md:flex-row md:items-start">
-                    <div className="flex flex-col items-center">
-                      <div className="relative w-32 h-32 md:w-40 md:h-40 flex items-center justify-center">
-                        <svg
-                          viewBox="0 0 120 120"
-                          className="w-full h-full -rotate-90"
-                        >
-                          <circle
-                            cx="60"
-                            cy="60"
-                            r="50"
-                            className="text-slate-800"
-                            stroke="currentColor"
-                            strokeWidth="8"
-                            fill="none"
-                          />
-                          <circle
-                            cx="60"
-                            cy="60"
-                            r="50"
-                            strokeWidth="8"
-                            fill="none"
-                            strokeDasharray="314"
-                            strokeDashoffset={
-                              314 - (314 * Math.min(98, analysis.trustScore + (analysis.isRegistered ? 5 : 0))) / 100
-                            }
-                            className="transition-all duration-500 ease-out"
-                            stroke={
-                              analysis.trustScore >= 80
-                                ? "#22c55e"
-                                : analysis.trustScore >= 50
-                                ? "#facc15"
-                                : "#ef4444"
-                            }
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <span
-                            className={`text-4xl font-bold tracking-tighter drop-shadow-[0_0_40px_rgba(16,185,129,0.8)] ${
-                              analysis.trustScore >= 80
-                                ? "text-emerald-400"
-                                : analysis.trustScore >= 50
-                                ? "text-amber-300"
-                                : "text-rose-400"
-                            }`}
-                          >
-                            {Math.min(98, analysis.trustScore + (analysis.isRegistered ? 5 : 0))}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-2 text-center">
-                        ACTIVITY SCORE
-                      </p>
-                      {analysis.isRegistered && (
-                        <p className="text-[10px] text-emerald-400 font-semibold mt-1 text-center animate-pulse">
-                          +5 Network Bonus
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex-1 w-full">
-                      <p className="text-[10px] text-slate-500/60 leading-tight mb-4">
-                        High value wallet with significant on-chain history and diverse asset portfolio.
-                      </p>
-                      {/* Stats Grid - Financial Dashboard Style */}
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-4 w-full">
-                        <div className="flex flex-col">
-                          <span className="text-[10px] uppercase text-slate-500 font-semibold tracking-wider mb-0.5">
-                            SOL Balance
-                          </span>
-                          <span className="text-sm text-white font-mono font-bold tracking-tight tabular-nums leading-none">
-                            {analysis.solBalance.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] uppercase text-slate-500 font-semibold tracking-wider mb-0.5">
-                            Tx Count
-                          </span>
-                          <span className="text-sm text-white font-mono font-bold tracking-tight tabular-nums leading-none">
-                            {analysis.transactionCount === -1
-                              ? "Unknown"
-                              : analysis.transactionCount >= 1000
-                              ? `${Math.floor(analysis.transactionCount / 1000).toLocaleString()},${String(analysis.transactionCount % 1000).padStart(3, "0")}+`
-                              : analysis.transactionCount.toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] uppercase text-slate-500 font-semibold tracking-wider mb-0.5">
-                            Tokens
-                          </span>
-                          <span className="text-sm text-white font-mono font-bold tracking-tight tabular-nums leading-none">
-                            {analysis.tokenCount.toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] uppercase text-slate-500 font-semibold tracking-wider mb-0.5">
-                            Assets
-                          </span>
-                          <span className="text-sm text-white font-mono font-bold tracking-tight tabular-nums leading-none">
-                            {analysis.nftCount.toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-                      {/* Production Grade: First Activity Detected */}
-                      {analysis.approxWalletAge != null && (
-                        <div className="flex items-center gap-2 mt-3 px-2 py-1.5 rounded-md bg-slate-800/40 border border-slate-700/30">
-                          <Calendar className="h-3.5 w-3.5 text-slate-500" />
-                          <span className="text-[10px] uppercase text-slate-500 tracking-wider">
-                            First Activity Detected
-                          </span>
-                          <span className="text-[10px] text-slate-300 font-mono font-semibold ml-auto">
-                            {formatWalletAge(analysis.approxWalletAge)} ago
-                          </span>
-                        </div>
-                      )}
-                      {/* Pump Match - Badge Scores (Transparency) */}
-                      <div className="pt-3 border-t border-slate-800 mt-4">
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 mb-2">
-                          Badge Scores
-                        </p>
-                        <div className="flex flex-wrap gap-2 text-[10px]">
-                          <span className="text-blue-400">
-                            System: {analysis.systemScore}
-                          </span>
-                          <span className="text-amber-400">
-                            Social: {analysis.socialScore.toFixed(1)} {analysis.socialScore !== analysis.systemScore + analysis.socialScore && "(Decayed)"}
-                          </span>
-                        </div>
-                      </div>
-                      {analysis.badges.length > 0 && (
-                        <div className="pt-2 border-t border-slate-800 mt-2">
-                          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 mb-2">
-                            Active Badges
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {analysis.badges.includes("whale") && (
-                              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-500/70 via-sky-500/70 to-violet-500/70 px-3 py-1 text-[11px] text-slate-50 shadow-md shadow-sky-500/30">
-                                <Waves className="h-3.5 w-3.5" />
-                                <span className="font-semibold">Whale</span>
-                              </div>
-                            )}
-                            {analysis.badges.includes("dev") && (
-                              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-blue-500/70 to-cyan-500/70 px-3 py-1 text-[11px] text-slate-50 shadow-md shadow-blue-500/30">
-                                <Sparkles className="h-3.5 w-3.5" />
-                                <span className="font-semibold">Dev</span>
-                              </div>
-                            )}
-                            {analysis.badges.includes("og_wallet") && (
-                              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500/70 to-yellow-500/80 px-3 py-1 text-[11px] text-slate-950 shadow-md shadow-amber-500/40">
-                                <History className="h-3.5 w-3.5" />
-                                <span className="font-semibold">OG Wallet</span>
-                              </div>
-                            )}
-                            {analysis.badges.includes("community_trusted") && (
-                              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500/70 to-yellow-500/80 px-3 py-1 text-[11px] text-slate-950 shadow-md shadow-amber-500/40">
-                                <Sparkles className="h-3.5 w-3.5" />
-                                <span className="font-semibold">Community Trusted</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* STATS + CHART */}
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-5 shadow-lg shadow-emerald-500/15">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500 mb-3">
-                      Wallet Stats
-                    </p>
-                    <div className="grid grid-cols-2 gap-3 text-xs md:text-sm">
-                      <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-400">
-                          SOL Balance
-                        </p>
-                        <p className="mt-1 text-emerald-300 font-semibold">
-                          {analysis.solBalance.toFixed(4)} SOL
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-sky-500/40 bg-sky-500/5 px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-400">
-                          Tokens
-                        </p>
-                        <p className="mt-1 text-sky-200 font-semibold">
-                          {analysis.tokenCount}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-purple-500/40 bg-purple-500/5 px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-400">
-                          Transactions
-                        </p>
-                        <p className="mt-1 text-purple-200 font-semibold">
-                          {analysis.transactionCount === -1
-                            ? "N/A"
-                            : analysis.transactionCount === 1000
-                            ? "1000+"
-                            : analysis.transactionCount.toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-400">
-                          NFTs / Assets
-                        </p>
-                        <p className="mt-1 text-amber-200 font-semibold">
-                          {analysis.nftCount}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-5 shadow-lg shadow-emerald-500/15">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                        Activity Snapshot
-                      </p>
-                      <span className="text-[11px] text-emerald-300">
-                        Heuristic score
+              {HOW_IT_WORKS.map((step) => {
+                const Icon = step.icon;
+                return (
+                  <div key={step.step} className="relative flex flex-col items-center text-center p-6">
+                    {/* Step icon */}
+                    <div className={`relative mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border ${step.bg}`}>
+                      <Icon className={`h-7 w-7 ${step.color}`} />
+                      <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 border border-slate-700 text-[9px] font-black text-slate-500">
+                        {step.step}
                       </span>
                     </div>
-                    <div className="h-40 md:h-44">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart
-                          data={activityChartData}
-                          margin={{ left: -20, right: 0, top: 5, bottom: 0 }}
-                        >
-                          <XAxis
-                            dataKey="label"
-                            tickLine={false}
-                            axisLine={false}
-                            tick={{ fill: "#6b7280", fontSize: 11 }}
-                          />
-                          <YAxis
-                            domain={[0, 100]}
-                            tickLine={false}
-                            axisLine={false}
-                            tick={{ fill: "#6b7280", fontSize: 11 }}
-                            tickCount={5}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "#020617",
-                              border: "1px solid rgba(52,211,153,0.5)",
-                              borderRadius: "0.75rem",
-                              padding: "8px 10px",
-                              fontSize: 11,
-                            }}
-                            labelStyle={{ color: "#e5e7eb", marginBottom: 4 }}
-                            cursor={{
-                              stroke: "rgba(148,163,184,0.4)",
-                              strokeWidth: 1,
-                            }}
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="score"
-                            stroke="#22c55e"
-                            strokeWidth={2.4}
-                            dot={false}
-                            activeDot={{
-                              r: 5,
-                              stroke: "#22c55e",
-                              strokeWidth: 2,
-                              fill: "#0f172a",
-                            }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <p className="mt-2 text-[11px] text-slate-500">
-                      Score calculated based on balance, token diversity, and asset count.
-                    </p>
+                    <h3 className="text-base font-bold text-slate-100 mb-2">{step.title}</h3>
+                    <p className="text-sm text-slate-500 leading-relaxed">{step.desc}</p>
                   </div>
-
-                  {/* ⚠️ PUMP.FUN DNA KARTI - SAHİPLİK KONTROLÜ */}
-                  {isOwner ? (
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 md:p-5 shadow-lg shadow-emerald-500/15">
-                      <div className="flex items-center justify-between mb-4">
-                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500 flex items-center gap-2">
-                          💊 Pump.fun DNA
-                        </p>
-                        {analysis?.pumpStats?.pumpMintsTouched && analysis.pumpStats.pumpMintsTouched >= 3 && (
-                          <span className="text-[10px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                            {analysis.pumpStats.closedPositions} Trades Closed
-                          </span>
-                        )}
-                      </div>
-
-                      {/* ZIRH 4: Null Safety ve Veri Kontratı Render Akışı */}
-                      {analysis?.pumpStats == null ? (
-                        <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
-                          <span className="text-2xl mb-2 opacity-50">😴</span>
-                          <p className="text-sm font-medium text-slate-400">No Pump Activity</p>
-                          <p className="text-[10px] text-slate-500 mt-1">Either very safe, or very boring.</p>
-                        </div>
-                      ) : analysis.pumpStats.pumpMintsTouched < 3 ? (
-                        <div className="flex flex-col items-center justify-center py-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
-                          <span className="text-2xl mb-2 opacity-50">🌱</span>
-                          <p className="text-sm font-medium text-slate-400">Insufficient Data</p>
-                          <p className="text-[10px] text-slate-500 mt-1">Only touched {analysis.pumpStats.pumpMintsTouched} tokens. Need at least 3 for a fair verdict.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-5">
-                          {/* Median Hold Time */}
-                          <div>
-                            <div className="flex justify-between text-xs mb-1.5">
-                              <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Median Hold Time</span>
-                              <span className="font-mono font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded text-[11px]">
-                                {formatHoldTime(analysis.pumpStats.medianHoldTimeSeconds)}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Jeet Meter */}
-                          <div>
-                            <div className="flex justify-between text-xs mb-1.5">
-                              <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Jeet Behavior</span>
-                              <span className="font-mono text-rose-400 font-bold text-[11px]">
-                                {Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0}/100
-                              </span>
-                            </div>
-                            <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                              <div
-                                className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-1000"
-                                style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.jeetScore) ? analysis.pumpStats.jeetScore : 0))}%` }}
-                              />
-                            </div>
-                          </div>
-
-                          {/* Rug Magnet Meter */}
-                          <div>
-                            <div className="flex justify-between text-xs mb-1.5">
-                              <span className="text-slate-400 uppercase tracking-wider text-[10px] font-semibold">Rug Exposure (Dead Bags)</span>
-                              <span className="font-mono text-purple-400 font-bold text-[11px]">
-                                {Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0}/100
-                              </span>
-                            </div>
-                            <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                              <div
-                                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000"
-                                style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(analysis.pumpStats.rugMagnetScore) ? analysis.pumpStats.rugMagnetScore : 0))}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-8 flex flex-col items-center justify-center text-center shadow-lg">
-                      <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center mb-4">
-                        <Lock className="h-5 w-5 text-slate-400" />
-                      </div>
-                      <h3 className="text-lg font-semibold text-slate-200 mb-2">Classified Pump.fun DNA</h3>
-                      <p className="text-sm text-slate-400 max-w-sm">
-                        Detailed trading behaviors, Jeet metrics, and Rug exposures are private. You must connect this wallet to view its DNA.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* ── Opt-In Network: Join CTA / Active Agent Status ── */}
-              {!analysis.isRegistered ? (
-                <button
-                  type="button"
-                  onClick={() => setIsJoinModalOpen(true)}
-                  className="w-full mt-5 bg-gradient-to-r from-emerald-500 to-emerald-400 text-black font-semibold py-3 rounded-xl shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99] transition-all"
-                >
-                  Join Network &amp; Find Squad
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsJoinModalOpen(true)}
-                  className="w-full mt-5 border border-emerald-500/30 bg-emerald-500/5 rounded-xl p-3 cursor-pointer hover:border-emerald-400 transition-colors text-left"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-emerald-400 font-medium text-sm">
-                        Active Network Agent
-                      </p>
-                      {analysis.intent && (
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          Intent: {analysis.intent.replace(/_/g, " ")}
-                        </p>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">
-                      Edit
-                    </span>
-                  </div>
-                </button>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* MATCH LAYER - Recommended Squad Matches or Locked State */}
-        {analysis && !searchResults && (
-          <section className="mt-12 md:mt-16">
-            <div className="mx-auto max-w-6xl">
-              <div className="text-center mb-8">
-                <p className="text-xs uppercase tracking-[0.3em] text-emerald-400/70 mb-2">
-                  Match Layer
-                </p>
-                <h2 className="text-2xl md:text-3xl font-semibold text-slate-100 mb-2">
-                  <span className="bg-gradient-to-r from-emerald-400 via-sky-400 to-emerald-400 bg-clip-text text-transparent">
-                    🤝 Recommended Squad Matches
-                  </span>
-                </h2>
-              </div>
-
-              {/* Opt-In Network Architecture - State 1 (Guest) vs State 2 (Member) */}
-              {analysis.trustScore < 50 ? (
-                /* Locked State - Trust Score too low */
-                <div className="mx-auto max-w-2xl rounded-2xl border border-red-500/20 bg-gradient-to-br from-slate-950 via-red-950/10 to-slate-900/90 p-8 md:p-12 text-center shadow-lg shadow-red-500/10">
-                  <div className="mb-6">
-                    <div className="inline-flex items-center justify-center w-20 h-20 rounded-full border-2 border-red-500/50 bg-red-500/10 mb-4">
-                      <Lock className="h-10 w-10 text-red-400" />
-                    </div>
-                    <h3 className="text-xl md:text-2xl font-semibold text-slate-100 mb-2">
-                      Matchmaking Locked
-                    </h3>
-                  </div>
-                  <p className="text-sm md:text-base text-slate-300 mb-4 leading-relaxed">
-                    On-chain activity score too low (&lt;50). Your current score is{" "}
-                    <span className="text-red-400 font-semibold">{analysis.trustScore}/100</span>.
-                    Increase on-chain activity to unlock matchmaking.
-                  </p>
-                  <div className="mt-6 p-4 rounded-lg border border-slate-700/50 bg-slate-800/30">
-                    <p className="text-xs text-slate-400 mb-2">Tips to improve your score:</p>
-                    <ul className="text-xs text-slate-500 space-y-1 text-left max-w-md mx-auto">
-                      <li>- Increase your SOL balance (System Score: {analysis.systemScore})</li>
-                      <li>- Make more on-chain transactions</li>
-                      <li>- Earn community endorsements (Social Score: {analysis.socialScore.toFixed(1)})</li>
-                      <li>- Build a consistent on-chain history</li>
-                    </ul>
-                  </div>
-                </div>
-              ) : !analysis.isRegistered ? (
-                /* STATE 1: Guest - Lock matches, prompt to Join via modal */
-                <div className="mx-auto max-w-2xl rounded-2xl border border-amber-500/20 bg-gradient-to-br from-slate-950 via-amber-950/10 to-slate-900/90 p-8 md:p-12 text-center shadow-lg shadow-amber-500/10">
-                  <div className="mb-6">
-                    <div className="inline-flex items-center justify-center w-20 h-20 rounded-full border-2 border-amber-500/50 bg-amber-500/10 mb-4">
-                      <Users className="h-10 w-10 text-amber-400" />
-                    </div>
-                    <h3 className="text-xl md:text-2xl font-semibold text-slate-100 mb-2">
-                      Join Pump Match Network
-                    </h3>
-                  </div>
-                  <p className="text-sm md:text-base text-slate-300 mb-6 leading-relaxed">
-                    You&apos;re viewing preview matches. Join the Pump Match Network to unlock real connections and find your perfect squad.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setIsJoinModalOpen(true)}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 text-black font-semibold hover:from-emerald-400 hover:to-emerald-300 transition-all shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99]"
-                  >
-                    <Users className="h-4 w-4" />
-                    Join Network &amp; Find Squad
-                  </button>
-                  <p className="mt-6 text-xs text-slate-500">
-                    By joining, you agree to be discoverable by other network members.
-                  </p>
-                </div>
-              ) : loading && loadingPhase.includes("Fetching") ? (
-                /* SKELETON: Network matches loading */
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {[...Array(3)].map((_, i) => (
-                    <MatchCardSkeleton key={i} />
-                  ))}
-                </div>
-              ) : matches.length > 0 ? (
-                /* STATE 2: Member - Show network matches */
-                <>
-                  <p className="text-sm text-slate-400 max-w-2xl mx-auto text-center mb-8">
-                    Active network members matching your profile. These are real users who have opted into the network.
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {matches.map((profile) => (
-                      <MatchCard
-                        key={profile.id}
-                        profile={profile}
-                        userIntent={userIntent}
-                        isOptedIn={analysis?.isRegistered}
-                        onConnect={() => {
-                          setToast(`Connection request sent to ${profile.username}!`);
-                        }}
-                        onEndorse={
-                          profile.address
-                            ? async () => {
-                                // 1. Başarısız Senaryo Dönüşü
-                                if (!canEndorse) {
-                                  if (mountedRef.current) setToast("⚠️ Access Denied: Trust Score 50+ required to endorse.");
-                                  return { success: false, message: "Trust Score 50+ required." };
-                                }
-
-                                // 2. İşlemi Bekle ve Başarılı Senaryo Dönüşü
-                                try {
-                                  await safeEndorse(profile.address!);
-                                  return { success: true, message: "Endorsement sent!" };
-                                } catch (error) {
-                                  return { success: false, message: "Endorsement failed." };
-                                }
-                              }
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </div>
-                </>
-              ) : (
-                /* STATE 2: Member but no matches found */
-                <div className="mx-auto max-w-2xl rounded-2xl border border-slate-700/40 bg-slate-900/50 p-10 text-center">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full border border-slate-700/50 bg-slate-800/30 mb-5">
-                    <Users className="h-7 w-7 text-slate-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-200 mb-2">No matches yet</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed mb-6">
-                    The network is still growing. Try adjusting your intent or browsing active agents in the Arena below.
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                    <button
-                      type="button"
-                      onClick={() => setIsJoinModalOpen(true)}
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-                    >
-                      Update Intent
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFilterOpen(true)}
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/50 text-sm font-medium text-slate-300 hover:text-slate-100 hover:border-slate-600 transition-colors"
-                    >
-                      <SlidersHorizontal className="h-4 w-4" />
-                      Browse Network
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* ARENA LEADERBOARD — Always visible when no search results */}
-        {!searchResults && (
-          <ArenaLeaderboard
-            walletAddress={publicKey?.toBase58()}
-            isOptedIn={analysis?.isRegistered}
-          />
-        )}
-
-        {/* v2: Intent Layer - Onboarding Modal */}
-        {showIntentModal && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-2xl border border-slate-700/60 p-6 md:p-8 max-w-md w-full shadow-2xl shadow-black/40">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-xl font-semibold text-slate-100">What are you looking for?</h2>
-                <button
-                  onClick={() => setShowIntentModal(false)}
-                  className="rounded-full p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
-                >
-                  <X className="h-4.5 w-4.5" />
-                </button>
-              </div>
-              <p className="text-sm text-slate-400 mb-5">
-                Select your intent to unlock better squad matches.
-              </p>
-              <div className="space-y-2">
-                {(
-                  [
-                    { value: "BUILD_SQUAD", emoji: "🛠️", label: "Build a Squad", description: "Find devs, artists, and community builders" },
-                    { value: "FIND_FUNDING", emoji: "💰", label: "Find Funding", description: "Connect with whales and early investors" },
-                    { value: "HIRE_TALENT", emoji: "🎯", label: "Hire Talent", description: "Scout experienced builders for your project" },
-                    { value: "JOIN_PROJECT", emoji: "🚀", label: "Join a Project", description: "Apply to teams that match your skills" },
-                    { value: "NETWORK", emoji: "🤝", label: "Just Network", description: "Explore the ecosystem and meet others" },
-                  ] as { value: UserIntent; emoji: string; label: string; description: string }[]
-                ).map(({ value, emoji, label, description }) => (
-                  <button
-                    key={value}
-                    onClick={async () => {
-                      setUserIntent(value);
-                      setShowIntentModal(false);
-                      if (query.trim()) {
-                        setLoading(true);
-                        setLoadingPhase("Recalculating matches...");
-                        try {
-                          const response = await analyzeWallet(query.trim(), value);
-                          setAnalysis(response.walletAnalysis);
-                          if (response.walletAnalysis.isRegistered) {
-                            setLoadingPhase("Fetching Network Matches...");
-                            try {
-                              const networkMatches = await getNetworkMatches(
-                                response.walletAnalysis.address,
-                                response.walletAnalysis,
-                              );
-                              setMatches(networkMatches);
-                            } catch {
-                              setMatches(response.matches);
-                            }
-                          } else {
-                            setMatches(response.matches);
-                          }
-                        } catch (err) {
-                          // eslint-disable-next-line no-console
-                          console.error(err);
-                          setError("An error occurred during analysis.");
-                        } finally {
-                          setLoading(false);
-                          setLoadingPhase("");
-                        }
-                      }
-                    }}
-                    className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-150 ${
-                      userIntent === value
-                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300 shadow-sm shadow-emerald-500/10"
-                        : "border-slate-700/60 bg-slate-800/30 text-slate-300 hover:border-slate-600 hover:bg-slate-800/60"
-                    }`}
-                  >
-                    <span className="text-xl leading-none flex-shrink-0">{emoji}</span>
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm leading-tight">{label}</div>
-                      <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">{description}</div>
-                    </div>
-                    {userIntent === value && (
-                      <div className="ml-auto flex-shrink-0 h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
-                        <div className="h-2 w-2 rounded-full bg-emerald-400" />
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => {
-                  const walletAddress = publicKey?.toBase58();
-                  if (walletAddress) {
-                    try {
-                      localStorage.setItem(`pumpmatch_skip_intent_${walletAddress}`, "true");
-                    } catch {
-                      // ignore localStorage errors (private mode, etc.)
-                    }
-                  }
-                  setShowIntentModal(false);
-                  if (query.trim() && !userIntent) {
-                    handleAnalyze();
-                  }
-                }}
-                className="mt-4 w-full px-4 py-2 text-sm text-slate-500 hover:text-slate-300 transition-colors"
-              >
-                Skip for now
-              </button>
+                );
+              })}
             </div>
           </div>
-        )}
-        {/* Opt-In Network: Join / Update Intent Modal */}
-        {analysis && (
-          <JoinNetworkModal
-            address={analysis.address}
-            walletAnalysis={analysis}
-            isOpen={isJoinModalOpen}
-            onClose={() => setIsJoinModalOpen(false)}
-            onDismissWithoutJoin={() => {
-              try {
-                localStorage.setItem(getSkipJoinKey(analysis.address), "true");
-              } catch {
-                // ignore localStorage errors (private mode, etc.)
-              }
-              setIsJoinModalOpen(false);
-            }}
-            currentIntent={analysis.intent?.replace(/_/g, " ")}
-            currentUsername={userProfile?.username}
-            currentTags={userProfile?.tags}
-            currentSocialLinks={userProfile?.socialLinks}
-            isEditing={analysis.isRegistered}
-            onSuccess={(intent) => {
-              // Update local state immediately (no full page reload)
-              setAnalysis((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      isRegistered: true,
-                      intent: intent as WalletAnalysis["intent"],
-                    }
-                  : prev,
-              );
-              // Network Dopamine Layer: Success toast
-              setToast("You are now discoverable! Your Trust Score has been boosted by the Network Protocol.");
-              // Re-fetch network matches now that user is opted in
-              if (analysis.address) {
-                getNetworkMatches(analysis.address, {
-                  ...analysis,
-                  isRegistered: true,
-                  intent: intent as WalletAnalysis["intent"],
-                })
-                  .then((networkMatches) => setMatches(networkMatches))
-                  .catch(() => {
-                    // Keep existing matches on error
-                  });
-              }
-            }}
-          />
-        )}
-        {/* God Mode Discovery: Filter Sheet */}
-        <FilterSheet
-          open={filterOpen}
-          onClose={() => setFilterOpen(false)}
-          onSearch={handleSearchNetwork}
-          isSearching={isSearching}
-        />
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* FINAL CTA                                                          */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        <section className="border-t border-slate-800/50">
+          <div className="mx-auto max-w-3xl px-4 py-24 sm:py-32 text-center">
+
+            {/* Glow behind the CTA card */}
+            <div className="relative mx-auto max-w-2xl">
+              <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-cyan-500/8 to-violet-500/10 rounded-3xl blur-2xl" />
+
+              <div className="relative rounded-3xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl p-10 sm:p-14">
+                <div className="mb-4 inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                  <Logo className="h-10 w-10" />
+                </div>
+
+                <h2 className="text-3xl font-black text-slate-100 mb-3 sm:text-4xl">
+                  Ready to find your{" "}
+                  <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                    squad?
+                  </span>
+                </h2>
+
+                <p className="text-slate-400 text-sm leading-relaxed mb-8 max-w-md mx-auto">
+                  Connect your Phantom wallet and let your on-chain history speak for itself.
+                  It takes 10 seconds.
+                </p>
+
+                <div className="flex flex-col items-center gap-3">
+                  <Web3LoginButton size="lg" />
+                  <p className="text-xs text-slate-700 mt-1">
+                    No registration · Non-custodial · Open source
+                  </p>
+                </div>
+
+                {/* Social proof micro-strip */}
+                <div className="mt-8 pt-8 border-t border-slate-800/70 flex flex-wrap items-center justify-center gap-4 text-xs text-slate-600">
+                  <span className="flex items-center gap-1.5">
+                    <Star className="h-3 w-3 text-amber-500" />
+                    Top Solana DApp — Season 1
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <TrendingUp className="h-3 w-3 text-emerald-600" />
+                    1,337+ wallets onboarded
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-3 w-3 text-cyan-600" />
+                    PKCE-secured auth
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Footer ─────────────────────────────────────────────────────────── */}
+        <footer className="border-t border-slate-800/50 py-8">
+          <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-700">
+            <div className="flex items-center gap-2">
+              <Logo className="h-5 w-5" />
+              <span className="font-semibold text-slate-600">Pump Match</span>
+              <span>· Season 1 · Powered by Solana</span>
+            </div>
+            <div className="flex items-center gap-6">
+              <Link href="/docs" className="hover:text-slate-400 transition-colors">Docs</Link>
+              <a href="https://x.com/PumpMatch" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">X / Twitter</a>
+              <Link href="/command-center" className="hover:text-emerald-500 transition-colors text-emerald-700">Launch App</Link>
+            </div>
+          </div>
+        </footer>
+
       </main>
     </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────
-// God Mode Discovery: Agent Micro Card (Minimal, Click-to-Expand)
-// ──────────────────────────────────────────────────────────────
-
-function getAgentTrustColor(score: number) {
-  if (score >= 90) return "text-emerald-400";
-  if (score >= 80) return "text-emerald-300";
-  if (score >= 60) return "text-amber-300";
-  return "text-rose-400";
-}
-
-function getAgentIdentityIcon(state?: string) {
-  switch (state) {
-    case "VERIFIED": return "✅";
-    case "REACHABLE": return "🐦";
-    default: return "👻";
-  }
-}
-
-function generateAgentColor(username: string): string {
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = username.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 65%, 45%)`;
-}
-
-function AgentMicroCard({ agent, onClick }: { agent: NetworkAgent; onClick: () => void }) {
-  const avatarColor = generateAgentColor(agent.username);
-  const trustColor = getAgentTrustColor(agent.trustScore);
-  const identityIcon = getAgentIdentityIcon(agent.identityState);
-
-  // Badge icon mapping (icons only, no labels)
-  const badgeIcons = agent.activeBadges.slice(0, 3).map((badge) => {
-    switch (badge.icon) {
-      case "Waves": return <Waves key={badge.id} className="h-3 w-3 text-indigo-400" />;
-      case "Code": return <Code key={badge.id} className="h-3 w-3 text-blue-400" />;
-      case "ShieldCheck": return <ShieldCheck key={badge.id} className="h-3 w-3 text-amber-400" />;
-      case "Crown": return <BadgeCheck key={badge.id} className="h-3 w-3 text-amber-400" />;
-      case "Clock": return <History key={badge.id} className="h-3 w-3 text-slate-400" />;
-      default: return <BadgeCheck key={badge.id} className="h-3 w-3 text-slate-400" />;
-    }
-  });
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group relative flex flex-col items-center gap-2 rounded-xl border p-4 text-center transition-all duration-200 hover:scale-[1.02] cursor-pointer ${
-        agent.identityState === "VERIFIED"
-          ? "border-amber-500/30 bg-gradient-to-b from-amber-950/20 via-slate-950/90 to-slate-950/90 hover:border-amber-500/50 shadow-sm shadow-amber-500/10"
-          : "border-slate-800 bg-slate-950/80 hover:border-slate-700 hover:bg-slate-900/80"
-      }`}
-    >
-      {/* Avatar */}
-      <div
-        className="h-10 w-10 rounded-full flex items-center justify-center text-white font-semibold text-sm shadow-md flex-shrink-0"
-        style={{ backgroundColor: avatarColor }}
-      >
-        {agent.username.charAt(0).toUpperCase()}
-      </div>
-
-      {/* Username + Identity */}
-      <div className="flex items-center gap-1 min-w-0 w-full justify-center">
-        <span className="text-xs font-medium text-slate-200 truncate max-w-[100px]">
-          {agent.username}
-        </span>
-        <span className="text-[10px] flex-shrink-0" title={agent.identityState ?? "Ghost"}>
-          {identityIcon}
-        </span>
-      </div>
-
-      {/* Trust Score - BIG & COLORED */}
-      <div className="flex flex-col items-center">
-        <span className={`text-2xl font-bold tabular-nums tracking-tighter leading-none ${trustColor}`}>
-          {agent.trustScore}
-        </span>
-        <span className="text-[9px] uppercase tracking-widest text-slate-600 mt-0.5">
-          Score
-        </span>
-      </div>
-
-      {/* Badge Icons Row */}
-      {badgeIcons.length > 0 && (
-        <div className="flex items-center gap-1.5">
-          {badgeIcons}
-        </div>
-      )}
-
-      {/* Hover hint */}
-      <div className="absolute inset-x-0 bottom-0 h-0.5 rounded-b-xl bg-emerald-500/0 group-hover:bg-emerald-500/40 transition-colors" />
-    </button>
   );
 }
