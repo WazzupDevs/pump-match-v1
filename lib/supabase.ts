@@ -32,6 +32,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * Import ONLY inside server actions (lib/db.ts, app/actions/**).
  * NEVER import in any "use client" file.
  */
+import 'server-only';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!serviceRoleKey && process.env.NODE_ENV === "production") {
