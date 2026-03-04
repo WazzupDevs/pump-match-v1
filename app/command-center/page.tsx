@@ -4,7 +4,7 @@ import { Suspense, useState, useCallback, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useSquadAuth } from "@/components/providers/SquadProvider";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/client";
 import {
   LinkTwitterButton,
   TwitterLinkSync,

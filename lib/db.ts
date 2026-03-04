@@ -1,4 +1,5 @@
-import { supabase, supabaseAdmin } from './supabase';
+import "server-only";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters, Role, Badge, SocialProof, IdentityState, UserIntent, SocialLinks } from '@/types';
 
 // Strongly-typed input for upsertUser (replaces Partial<Record<string, unknown>>)
@@ -71,7 +72,8 @@ function mapDbUserToProfile(dbUser: Record<string, unknown>): UserProfile {
 // ── 1. TEMEL CRUD İŞLEMLERİ ──
 
 export async function getUserProfile(wallet: string): Promise<UserProfile | null> {
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('users')
     .select('*')
     .eq('wallet_address', wallet)
@@ -83,7 +85,8 @@ export async function getUserProfile(wallet: string): Promise<UserProfile | null
 
 // isUserRegistered: lightweight existence check — avoids SELECT * overhead
 export async function isUserRegistered(wallet: string): Promise<boolean> {
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('users')
     .select('id, is_opted_in')
     .eq('wallet_address', wallet)
@@ -118,6 +121,7 @@ export async function upsertUser(wallet: string, partialData: UpsertUserData) {
     }
   }
 
+  const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from('users')
     .upsert(dbData, { onConflict: 'wallet_address' })
@@ -154,7 +158,8 @@ export async function findMatches(
     'joined_at', 'identity_state', 'match_filters', 'last_match_snapshot_at', 'social_links',
   ].join(', ');
 
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('users')
     .select(MATCH_COLUMNS)
     .eq('is_opted_in', true)
@@ -174,6 +179,7 @@ export async function findMatches(
 
 // Snapshot güncelleme
 export async function updateMatchSnapshot(wallet: string, matches: MatchProfile[]) {
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('users')
     .update({
@@ -198,6 +204,7 @@ export async function addEndorsement(
   fromWallet: string,
   toWallet: string,
 ): Promise<{ success: boolean; alreadyEndorsed: boolean }> {
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('endorsements')
     .insert({ from_wallet: fromWallet, to_wallet: toWallet });
@@ -216,7 +223,8 @@ export async function addEndorsement(
 
 /** Get total endorsement count for a single wallet. */
 export async function getEndorsementCount(wallet: string): Promise<number> {
-  const { count, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { count, error } = await supabaseAdmin
     .from('endorsements')
     .select('id', { count: 'exact', head: true })
     .eq('to_wallet', wallet);
@@ -227,7 +235,8 @@ export async function getEndorsementCount(wallet: string): Promise<number> {
 
 /** Check if fromWallet has already endorsed toWallet. */
 export async function hasEndorsed(fromWallet: string, toWallet: string): Promise<boolean> {
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('endorsements')
     .select('id')
     .eq('from_wallet', fromWallet)
@@ -244,7 +253,8 @@ export async function hasEndorsed(fromWallet: string, toWallet: string): Promise
 export async function getEndorsementCounts(wallets: string[]): Promise<Map<string, number>> {
   if (wallets.length === 0) return new Map();
 
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('endorsements')
     .select('to_wallet')
     .in('to_wallet', wallets);
@@ -269,7 +279,8 @@ export async function getMyEndorsements(
 ): Promise<Set<string>> {
   if (toWallets.length === 0) return new Set();
 
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('endorsements')
     .select('to_wallet')
     .eq('from_wallet', fromWallet)
@@ -291,7 +302,8 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
   const limit  = Math.min(filters.limit  ?? 50, 100); // cap at 100
   const offset = filters.offset ?? 0;
 
-  let query = supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  let query = supabaseAdmin
     .from('users')
     .select(SEARCH_COLUMNS)
     .eq('is_opted_in', true); // Only search opted-in agents
@@ -341,7 +353,8 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
 
 /** Get all squads a wallet address belongs to. */
 export async function getMySquads(walletAddress: string): Promise<string[]> {
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('squad_members')
     .select('project_id')
     .eq('wallet_address', walletAddress)
@@ -355,7 +368,8 @@ export async function getMySquads(walletAddress: string): Promise<string[]> {
 export async function getSquadMemberCounts(projectIds: string[]): Promise<Map<string, number>> {
   if (projectIds.length === 0) return new Map();
 
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from('squad_members')
     .select('project_id')
     .in('project_id', projectIds)
@@ -378,6 +392,7 @@ export async function getSquadMemberCounts(projectIds: string[]): Promise<Map<st
  * but the user is no longer visible in the network or matched.
  */
 export async function leaveNetwork(wallet: string): Promise<boolean> {
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('users')
     .update({

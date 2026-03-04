@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { PublicKey } from "@solana/web3.js";  
 import { getAsset, type HeliusAssetInfo } from "@/lib/helius";
 import { getUserProfile, getSquadMemberCounts } from "@/lib/db";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
 
@@ -64,11 +64,22 @@ function isAuthorityRenounced(authority: string | null): boolean {
 // Arena Financial Snapshot Engine — Secure Claim Action
 // ──────────────────────────────────────────────────────────────
 export async function claimProjectAction(payload: { name: string; mint: string; walletAddress: string; nonce: string; timestamp: number; signature: string; }): Promise<ClaimResult> {
-  const canonicalWallet = payload.walletAddress.trim();
-  const normalizedWallet = canonicalWallet.toLowerCase();
-  const normalizedMint = payload.mint.trim();
+  let canonicalWallet: string;
+  let normalizedMint: string;
+  try {
+    canonicalWallet = new PublicKey(payload.walletAddress.trim()).toBase58();
+  } catch {
+    return { success: false, errorCode: "INVALID_INPUT", message: "Invalid wallet address." };
+  }
+  try {
+    normalizedMint = new PublicKey(payload.mint.trim()).toBase58();
+  } catch {
+    return { success: false, errorCode: "INVALID_INPUT", message: "Invalid contract address." };
+  }
 
-  const rateKey = `claim:${normalizedWallet}:${normalizedMint}`;
+  const supabaseAdmin = getSupabaseAdmin();
+
+  const rateKey = `claim:${canonicalWallet}:${normalizedMint}`;
   const rateCheck = await checkRateLimit(rateKey, RATE_LIMITS.CLAIM.maxRequests, RATE_LIMITS.CLAIM.windowMs);
   
   if (!rateCheck.allowed) return { success: false, errorCode: "RATE_LIMITED", message: "Too many claim attempts. Please wait." };
@@ -78,7 +89,7 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
 
   // Consume nonce FIRST — prevents replay/brute-force regardless of sig outcome.
   // Each unique nonce can only be attempted once; getting new nonces is rate-limited.
-  const { error: nonceError } = await supabaseAdmin.from("auth_nonces").insert({ nonce: payload.nonce, wallet_address: normalizedWallet, action: "claim_project" });
+  const { error: nonceError } = await supabaseAdmin.from("auth_nonces").insert({ nonce: payload.nonce, wallet_address: canonicalWallet, action: "claim_project" });
   if (nonceError) {
     if (nonceError.code === "23505") return { success: false, errorCode: "SIGNATURE_FAILED", message: "Replay attack detected." };
     return { success: false, errorCode: "DB_ERROR", message: "Security engine error." };
@@ -89,7 +100,7 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
   const isValidSig = await verifyLegacySignature(canonicalWallet, expectedMessage, payload.signature);
   if (!isValidSig) return { success: false, errorCode: "SIGNATURE_FAILED", message: "Cryptographic verification failed. Context mismatch." };
 
-  const userProfile = await getUserProfile(normalizedWallet);
+  const userProfile = await getUserProfile(canonicalWallet);
   if (!userProfile || !userProfile.isOptedIn) {
     return { success: false, errorCode: "AUTH_REQUIRED", message: "You must join the Pump Match Network first." };
   }
@@ -110,19 +121,47 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
   const extractedAuthority = extractUpdateAuthority(asset);
   if (isAuthorityRenounced(extractedAuthority)) return { success: false, errorCode: "RENOUNCED", message: "Project is Renounced. Community Claim coming soon." };
 
-  if (!extractedAuthority || extractedAuthority.toLowerCase() !== normalizedWallet) {
+  let canonicalAuthority: string | null = null;
+  if (extractedAuthority) {
+    try {
+      canonicalAuthority = new PublicKey(extractedAuthority.trim()).toBase58();
+    } catch {
+      canonicalAuthority = null;
+    }
+  }
+
+  if (!canonicalAuthority || canonicalAuthority !== canonicalWallet) {
     return { success: false, errorCode: "AUTHORITY_MISMATCH", message: "Ownership Verification Failed. You must be the active Update Authority." };
   }
 
-  const { data: existingProject } = await supabase.from("squad_projects").select("id, created_by").eq("mint_address", normalizedMint).maybeSingle();
+  const supabaseAdminForRead = getSupabaseAdmin();
+  const { data: existingProject } = await supabaseAdminForRead
+    .from("squad_projects")
+    .select("id, created_by")
+    .eq("mint_address", normalizedMint)
+    .maybeSingle();
 
   if (existingProject) {
-    if ((existingProject.created_by as string).toLowerCase() === normalizedWallet) return { success: true, message: "Welcome back, Founder.", projectId: existingProject.id as string };
+    if ((existingProject.created_by as string) === canonicalWallet) {
+      return { success: true, message: "Welcome back, Founder.", projectId: existingProject.id as string };
+    }
     return { success: false, errorCode: "ALREADY_CLAIMED", message: "Project already claimed by another founder." };
   }
 
   const { data, error } = await supabaseAdmin.from("squad_projects").insert({
-      project_name: payload.name.trim(), mint_address: normalizedMint, created_by: normalizedWallet, project_symbol: symbol, status: "active", claim_tier: "founder", is_renounced: false, update_authority: extractedAuthority.toLowerCase(), market_cap: null, liquidity_usd: null, volume_24h: null, last_valid_mc: null, last_mc_update: null,
+      project_name: payload.name.trim(),
+      mint_address: normalizedMint,
+      created_by: canonicalWallet,
+      project_symbol: symbol,
+      status: "active",
+      claim_tier: "founder",
+      is_renounced: false,
+      update_authority: canonicalAuthority,
+      market_cap: null,
+      liquidity_usd: null,
+      volume_24h: null,
+      last_valid_mc: null,
+      last_mc_update: null,
   }).select("id").single();
 
   if (error) {
@@ -175,7 +214,8 @@ export type PowerSquadProject = {
 };
 
 export async function getEliteAgents(): Promise<EliteAgent[]> {
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from("users")
     .select("id, wallet_address, username, trust_score, is_opted_in, identity_state")
     .eq("is_opted_in", true)
@@ -202,7 +242,8 @@ type FounderStats = {
 };
 
 export async function getPowerSquads(): Promise<PowerSquadProject[]> {
-  const { data, error } = await supabase
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin
     .from("squad_projects")
     .select("*")
     .order("last_valid_mc", { ascending: false, nullsFirst: false })
@@ -219,7 +260,7 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
   const founderMap = new Map<string, FounderStats>();
 
   if (founders.length > 0) {
-    const { data: usersData } = await supabase
+    const { data: usersData } = await supabaseAdmin
       .from("users")
       .select("wallet_address, trust_score, identity_state")
       .in("wallet_address", founders);
@@ -329,6 +370,7 @@ export async function addSquadMemberAction(payload: { projectId: string; targetW
     const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(founder, payload.signature, expectedPayload);
     if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature failed." };
 
+    const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.rpc('process_squad_transition', {
       p_project_id: payload.projectId, p_actor: derivedActor, p_target: target, p_action: 'invite', p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
     });
@@ -353,6 +395,7 @@ export async function joinSquadAction(payload: { projectId: string; walletAddres
     const { isValid, derivedActor, error: sigError } = await verifyWalletSignature(applicant, payload.signature, expectedPayload);
     if (!isValid || !derivedActor) return { success: false, message: sigError || "Signature failed." };
 
+    const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.rpc('process_squad_transition', {
       p_project_id: payload.projectId, p_actor: derivedActor, p_target: applicant, p_action: 'apply', p_role: payload.role, p_nonce: payload.nonce, p_signature: payload.signature
     });
@@ -410,6 +453,7 @@ export async function executeSquadTransitionAction(input: {
 
     // 6. SUPABASE RPC ÇAĞRISI (Governance Execution - v2)
     // Rol ve diğer doğrulamalar SQL içindeki SECURITY DEFINER tarafından halledilir
+    const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.rpc("process_squad_transition_v2", {
       p_project_id: expectedPayload.projectId,
       p_actor: expectedPayload.actorWallet,
@@ -440,11 +484,13 @@ const TERMINAL_STATUSES = ['kicked', 'left', 'rejected', 'revoked'] as const;
 
 export async function getSquadMembersAction(projectId: string) {
   try {
-    const { data, error } = await supabase
+    const supabaseAdmin = getSupabaseAdmin();
+    const terminalList = `(${TERMINAL_STATUSES.map((s) => `"${s}"`).join(",")})`;
+    const { data, error } = await supabaseAdmin
       .from('squad_members')
       .select('*')
       .eq('project_id', projectId)
-      .not('status', 'in', `(${TERMINAL_STATUSES.join(',')})`);
+      .not('status', 'in', terminalList);
 
     if (error) throw error;
     return { success: true, data };

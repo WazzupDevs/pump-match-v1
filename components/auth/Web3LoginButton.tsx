@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/client";
 import { ArrowRight, LogOut } from "lucide-react";
 import { useSquadAuth } from "@/components/providers/SquadProvider";
 

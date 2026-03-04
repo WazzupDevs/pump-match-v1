@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/client";
 import type { Session } from "@supabase/supabase-js";
 
 type SquadAuthCtx = {

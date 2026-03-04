@@ -1,6 +1,7 @@
 import "server-only";
 
-import { supabaseAdmin as supabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+const supabase = getSupabaseAdmin();
 import type { ArenaProjectStatus, DexScreenerPair } from "@/types";
 
 // ──────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { Logo } from "@/components/ui/logo";
 import { Navbar } from "@/components/ui/navbar";
 import { Web3LoginButton } from "@/components/auth/Web3LoginButton";
 import { useSquadAuth } from "@/components/providers/SquadProvider";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/client";
 import {
   BarChart3,
   Users,
