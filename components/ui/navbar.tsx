@@ -6,9 +6,17 @@ import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui/logo";
 import { BookOpen, Copy, Check, Twitter, Github } from "lucide-react";
 
+const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function normalizeAddress(input: string): string {
+  let normalized = input.trim();
+  if (normalized.startsWith("web3:solana:")) normalized = normalized.slice("web3:solana:".length);
+  return normalized;
+}
+
 const CONTRACT_ADDRESS = "8UaLndGKh2jFCdsH9nK2krKMFtfDXNme6rQv8JRipump";
 const TWITTER_URL = "https://x.com/PumpMatch";
-const GITHUB_URL = "https://github.com/https://github.com/WazzupDevs/pump-match-v1";
+const GITHUB_URL = "https://github.com/WazzupDevs/pump-match-v1";
 
 function shortCA(ca: string) {
   if (ca.length <= 10) return ca;
@@ -22,12 +30,27 @@ type NavbarProps = {
 export function Navbar({ children }: NavbarProps) {
   const pathname = usePathname();
   const [copied, setCopied] = useState(false);
+  const [query, setQuery] = useState("");
+  const [isInvalid, setIsInvalid] = useState(false);
 
   function handleCopy() {
     navigator.clipboard.writeText(CONTRACT_ADDRESS).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  }
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const normalized = normalizeAddress(query);
+    if (!normalized) return; // empty input: do nothing, don't mark invalid
+    if (BASE58_REGEX.test(normalized)) {
+      window.open(`/profile/${normalized}`, "_blank", "noopener,noreferrer");
+      setQuery("");
+      setIsInvalid(false);
+    } else {
+      setIsInvalid(true);
+    }
   }
 
   return (
@@ -91,6 +114,23 @@ export function Navbar({ children }: NavbarProps) {
             <BookOpen className="h-3.5 w-3.5" />
             Docs
           </Link>
+
+          {/* Global wallet search */}
+          <form onSubmit={handleSearchSubmit} className="hidden sm:block">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setIsInvalid(false);
+              }}
+              placeholder="Wallet address…"
+              className={`w-36 rounded-lg border bg-slate-800/50 px-2.5 py-1.5 text-xs font-mono text-slate-200 placeholder:text-slate-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 ${
+                isInvalid ? "border-red-500/50 ring-1 ring-red-500/30" : "border-slate-700/50"
+              }`}
+              aria-invalid={isInvalid}
+            />
+          </form>
 
           {/* Wallet / Action Slot */}
           {children && (

@@ -3,9 +3,11 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { supabase } from "@/lib/supabase";
@@ -16,6 +18,8 @@ type SquadAuthCtx = {
   userId: string | null;
   walletAddress: string | null;
   twitterHandle: string | null;
+  /** Call to clear auth state immediately (e.g. on disconnect click). Ensures UI updates even if signOut event is delayed. */
+  clearAuthState: () => void;
 };
 
 const Ctx = createContext<SquadAuthCtx>({
@@ -23,6 +27,7 @@ const Ctx = createContext<SquadAuthCtx>({
   userId: null,
   walletAddress: null,
   twitterHandle: null,
+  clearAuthState: () => {},
 });
 
 /** Extract the Twitter handle from session identity data (no extra RPC needed). */
@@ -40,12 +45,27 @@ function extractTwitterHandle(session: Session | null): string | null {
 /**
  * Full profile sync: call ensure_wallet_profile to get (or create) the wallet
  * record and return the wallet address.
- * Only called on INITIAL_SESSION and SIGNED_IN — not on every token refresh
- * or identity update.
  */
 async function fetchWalletAddress(): Promise<string | null> {
-  const { data } = await supabase.rpc("ensure_wallet_profile");
-  return (data?.wallet_address as string | undefined) ?? null;
+  const { data, error } = await supabase.rpc("ensure_wallet_profile");
+  if (error) {
+    console.error("[SquadProvider] ensure_wallet_profile RPC error:", error);
+    return null;
+  }
+  // RPC returns jsonb: { wallet_address, verified_x_handle, id }
+  // or on failure: { error: "reason_code" }
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Record<string, unknown>;
+  if (obj.error) {
+    console.error("[SquadProvider] ensure_wallet_profile returned:", obj.error);
+    return null;
+  }
+  const raw = obj.wallet_address;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  let addr: string = raw;
+  // Supabase Web3 Auth may store identity as "web3:solana:<base58>" — strip prefix
+  if (addr.startsWith("web3:solana:")) addr = addr.slice("web3:solana:".length);
+  return addr;
 }
 
 export function SquadProvider({ children }: { children: React.ReactNode }) {
@@ -53,39 +73,44 @@ export function SquadProvider({ children }: { children: React.ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [twitterHandle, setTwitterHandle] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        // Always keep Realtime authorised with the latest token.
         await supabase.realtime.setAuth(session?.access_token ?? "");
 
-        if (event === "TOKEN_REFRESHED") {
-          // Token silently refreshed — no profile state has changed.
-          return;
-        }
+        if (event === "TOKEN_REFRESHED") return;
 
         if (event === "USER_UPDATED") {
-          // Fires when Twitter (or another identity) is linked.
-          // Only update the Twitter handle from the new session data;
-          // the wallet address hasn't changed so skip the RPC.
-          setTwitterHandle(extractTwitterHandle(session));
+          if (mountedRef.current) setTwitterHandle(extractTwitterHandle(session));
           return;
         }
 
-        // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT (and any other events)
         if (!session?.user?.id) {
-          setUserId(null);
-          setWalletAddress(null);
-          setTwitterHandle(null);
-          setReady(true);
+          if (mountedRef.current) {
+            setUserId(null);
+            setWalletAddress(null);
+            setTwitterHandle(null);
+            setReady(true);
+          }
           return;
         }
 
-        setUserId(session.user.id);
-        setTwitterHandle(extractTwitterHandle(session));
+        if (mountedRef.current) {
+          setUserId(session.user.id);
+          setTwitterHandle(extractTwitterHandle(session));
+        }
 
         const addr = await fetchWalletAddress();
+        if (!mountedRef.current) return;
         setWalletAddress(addr);
         setReady(true);
       }
@@ -96,9 +121,17 @@ export function SquadProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const clearAuthState = useCallback(() => {
+    if (!mountedRef.current) return;
+    setUserId(null);
+    setWalletAddress(null);
+    setTwitterHandle(null);
+    setReady(true);
+  }, []);
+
   const value = useMemo(
-    () => ({ ready, userId, walletAddress, twitterHandle }),
-    [ready, userId, walletAddress, twitterHandle]
+    () => ({ ready, userId, walletAddress, twitterHandle, clearAuthState }),
+    [ready, userId, walletAddress, twitterHandle, clearAuthState]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

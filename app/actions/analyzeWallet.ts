@@ -263,14 +263,17 @@ function calculateBadgeScores(badgeIds: BadgeId[]): { systemScore: number; socia
 
 export async function analyzeWallet(address: string, userIntent?: UserIntent): Promise<AnalyzeWalletResponse> {
   // Validation: Address required
-  const trimmed = address.trim();
+  let trimmed = address.trim();
+  // Defense in depth: Supabase Web3 Auth may prefix "web3:solana:" to the address
+  if (trimmed.startsWith("web3:solana:")) trimmed = trimmed.slice("web3:solana:".length);
   if (!trimmed) {
     throw new Error("Address is required");
   }
 
   // Production Grade: Validate Solana address format
   if (!isValidSolanaAddress(trimmed)) {
-    throw new Error("Invalid Solana address. Please enter a valid base58 wallet address.");
+    console.error("[analyzeWallet] Validation failed for address:", JSON.stringify(trimmed), "typeof:", typeof address, "length:", trimmed.length);
+    throw new Error(`Invalid Solana address. Please enter a valid base58 wallet address. (received: ${trimmed.slice(0, 12)}…, type: ${typeof address}, len: ${trimmed.length})`);
   }
 
   // SECURITY (VULN-04): Cache key is address-only — NOT intent-dependent.

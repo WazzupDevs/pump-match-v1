@@ -40,8 +40,15 @@ export default async function ProfilePage({
   params: Promise<{ address: string }>;
 }) {
   const { address: rawAddress } = await params;
-  const address = (rawAddress ?? "").trim();
-  if (!BASE58_RE.test(address)) notFound();
+  let address = (rawAddress ?? "").trim();
+  if (address.startsWith("web3:solana:")) address = address.slice("web3:solana:".length);
+  if (!BASE58_RE.test(address)) {
+    return (
+      <main className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
+        <p>Invalid wallet address.</p>
+      </main>
+    );
+  }
 
   const origin = await originFromHeaders();
   const res = await fetch(`${origin}/api/profile/${address}`, { next: { revalidate: 300 } });

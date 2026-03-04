@@ -1,30 +1,38 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, LogOut } from "lucide-react";
+import { useSquadAuth } from "@/components/providers/SquadProvider";
 
-type Phase = "idle" | "signing" | "redirecting";
+type Phase = "idle" | "signing" | "redirecting" | "disconnecting";
 
 export function Web3LoginButton({ size = "default" }: { size?: "default" | "lg" }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const mountedRef = useRef(true);
+
+  const { userId, clearAuthState } = useSquadAuth();
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const login = useCallback(async () => {
-    if (phase !== "idle") return; // Prevent double-clicks at any phase
+    if (phase !== "idle") return;
     setPhase("signing");
     setError(null);
 
     try {
-      const wallet =
-        (window as any).phantom?.solana ?? (window as any).solana;
+      const wallet = (window as any).phantom?.solana ?? (window as any).solana;
 
       if (!wallet?.isPhantom) {
-        throw new Error(
-          "Phantom wallet not found. Please install the Phantom extension."
-        );
+        throw new Error("Phantom wallet not found. Please install the Phantom extension.");
       }
 
       const { data, error: authError } = await supabase.auth.signInWithWeb3({
@@ -37,29 +45,67 @@ export function Web3LoginButton({ size = "default" }: { size?: "default" | "lg" 
 
       if (data?.session?.access_token) {
         await supabase.realtime.setAuth(data.session.access_token);
-
-        // Switch to "Redirecting…" phase — prevents re-clicks and shows feedback.
-        // We intentionally do NOT reset phase here; the component will unmount
-        // on successful navigation.
-        setPhase("redirecting");
-
-        // router.refresh() forces Next.js to re-fetch RSC data so the new
-        // Supabase session is available server-side before we navigate.
+        if (!mountedRef.current) return;
+        setPhase("idle");
         router.refresh();
-        router.push("/command-center");
+        // No auto-redirect: user stays on current page; they navigate via "Enter Command Center" link.
       }
     } catch (err: any) {
+      if (!mountedRef.current) return;
       setError(err?.message ?? "An unknown error occurred.");
-      setPhase("idle"); // Only reset on error so users can retry
+      setPhase("idle");
     }
   }, [phase, router]);
 
+  const logout = useCallback(async () => {
+    if (phase === "disconnecting") return;
+    setPhase("disconnecting");
+    // Optimistic clear: UI updates immediately so "Connect Wallet" shows even if signOut event is delayed
+    clearAuthState();
+    try {
+      await supabase.realtime.setAuth("");
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("Logout error:", err);
+    } finally {
+      if (!mountedRef.current) return;
+      setPhase("idle");
+      router.refresh();
+      const pathname = window.location.pathname;
+      if (pathname !== "/") router.push("/");
+    }
+  }, [router, phase, clearAuthState]);
+
   const isLg = size === "lg";
 
+  // EĞER KULLANICI GİRİŞ YAPMIŞSA KIRMIZI "DISCONNECT" BUTONUNU GÖSTER
+  if (userId) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <button
+          onClick={() => void logout()}
+          disabled={phase === "disconnecting"}
+          className={`
+            group inline-flex items-center justify-center gap-2 font-bold
+            rounded-xl bg-red-500/10 text-red-400 border border-red-500/20
+            hover:bg-red-500/20 disabled:opacity-60 disabled:cursor-not-allowed
+            transition-all duration-200
+            ${isLg ? "px-8 py-4 text-base" : "px-5 py-2.5 text-sm"}
+          `}
+        >
+          {phase === "disconnecting" ? "Disconnecting..." : "Disconnect Wallet"}
+          {phase !== "disconnecting" && <LogOut className={`${isLg ? "h-5 w-5" : "h-4 w-4"} group-hover:-translate-x-0.5 transition-transform`} />}
+        </button>
+      </div>
+    );
+  }
+
+  // EĞER GİRİŞ YAPMAMIŞSA NORMAL GİRİŞ BUTONUNU GÖSTER
   const labels: Record<Phase, string> = {
-    idle:        "Connect Wallet",
-    signing:     "Sign in Phantom…",
+    idle: "Connect Wallet",
+    signing: "Sign in Phantom…",
     redirecting: "Redirecting…",
+    disconnecting: "Disconnecting...",
   };
 
   return (

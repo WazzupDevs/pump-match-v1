@@ -2,6 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { Copy, Check } from "lucide-react";
+import { useSquadAuth } from "@/components/providers/SquadProvider";
+
+const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function normalizeAddress(input: string | null | undefined): string {
+  let normalized = (input ?? "").trim();
+  if (normalized.startsWith("web3:solana:")) normalized = normalized.slice("web3:solana:".length);
+  return normalized;
+}
 
 export function ShareBar({
   address,
@@ -13,6 +22,14 @@ export function ShareBar({
   profileUrl: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const { walletAddress } = useSquadAuth();
+
+  const normalizedViewed = normalizeAddress(address);
+  const normalizedConnected = normalizeAddress(walletAddress);
+  const isOwner =
+    BASE58_REGEX.test(normalizedViewed) &&
+    BASE58_REGEX.test(normalizedConnected) &&
+    normalizedViewed === normalizedConnected;
 
   const tweetUrl = useMemo(() => {
     const text = `I just checked my Solana On-Chain CV on @PumpMatch!\n\nMy Trust Score is ${trustScore}/100. 🧬\n\nCheck my Pump.fun DNA here:`;
@@ -21,17 +38,31 @@ export function ShareBar({
 
   return (
     <div className="flex flex-col sm:flex-row gap-2 mt-4 md:mt-0">
-      <a
-        href={tweetUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-all hover:bg-white hover:scale-105 shadow-lg shadow-white/10"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
-          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 3.827H5.078z"></path>
-        </svg>
-        Share on X
-      </a>
+      {isOwner ? (
+        <a
+          href={tweetUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-all hover:bg-white hover:scale-105 shadow-lg shadow-white/10"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 3.827H5.078z"></path>
+          </svg>
+          Share on X
+        </a>
+      ) : (
+        <button
+          type="button"
+          disabled
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-all shadow-lg shadow-white/10 opacity-60 cursor-not-allowed"
+          title="Connect this wallet to share"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 3.827H5.078z"></path>
+          </svg>
+          Share on X
+        </button>
+      )}
 
       <button
         type="button"

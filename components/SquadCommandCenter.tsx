@@ -1,13 +1,38 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
-import { ShieldCheck, XCircle, CheckCircle2, UserMinus, Clock, Users, ShieldAlert, Loader2, LogOut } from "lucide-react";
+import {
+  ShieldCheck,
+  XCircle,
+  CheckCircle2,
+  UserMinus,
+  Clock,
+  Users,
+  ShieldAlert,
+  Loader2,
+  LogOut,
+} from "lucide-react";
 import { executeSquadTransitionAction } from "@/app/actions/arena";
 
-type SquadStatus = 'pending_invite' | 'pending_application' | 'active' | 'rejected' | 'revoked' | 'kicked' | 'left';
-type ActionType = 'approve_app' | 'reject_app' | 'accept_invite' | 'reject_invite' | 'revoke_invite' | 'kick' | 'leave';
+type SquadStatus =
+  | "pending_invite"
+  | "pending_application"
+  | "active"
+  | "rejected"
+  | "revoked"
+  | "kicked"
+  | "left";
+
+type ActionType =
+  | "approve_app"
+  | "reject_app"
+  | "accept_invite"
+  | "reject_invite"
+  | "revoke_invite"
+  | "kick"
+  | "leave";
 
 interface SquadMember {
   id: string;
@@ -20,28 +45,33 @@ interface SquadMember {
 interface SquadCommandCenterProps {
   projectId: string;
   isFounder: boolean;
-  currentUserWallet: string;
+  currentUserWallet: string; // UI için kalabilir ama signing için source-of-truth değil
   members: SquadMember[];
   onRefresh: () => void;
 }
+
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const DOMAIN = "pumpmatch-governance" as const;
+const CHAIN = "solana-mainnet" as const;
 
 function maskWallet(address: string) {
   if (!address || address.length < 10) return address;
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }
 
-/**
- * CLIENT-SIDE CANONICALIZER
- * Ensures JSON stringify order matches backend for Ed25519 signature verification
- */
 type CanonicalValue = string | number | boolean | null;
 function createCanonicalMessage(payload: Record<string, CanonicalValue>): Uint8Array {
-  const sortedKeys = Object.keys(payload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const canonicalObject: Record<string, CanonicalValue> = {};
-  for (const key of sortedKeys) {
-    canonicalObject[key] = payload[key];
+  const keys = Object.keys(payload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const canonical: Record<string, CanonicalValue> = {};
+  for (const k of keys) {
+    const v = payload[k];
+    // nested object zırhı
+    if (typeof v === "object" && v !== null) {
+      throw new Error("Nested objects are not allowed in canonical JSON.");
+    }
+    canonical[k] = v;
   }
-  return new TextEncoder().encode(JSON.stringify(canonicalObject));
+  return new TextEncoder().encode(JSON.stringify(canonical));
 }
 
 export function SquadCommandCenter({
@@ -49,14 +79,17 @@ export function SquadCommandCenter({
   isFounder,
   currentUserWallet,
   members,
-  onRefresh
+  onRefresh,
 }: SquadCommandCenterProps) {
   const [activeTab, setActiveTab] = useState<"active" | "pending">("active");
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const { signMessage } = useWallet();
-  
+  const { publicKey, signMessage } = useWallet();
+
+  const actorWallet = publicKey?.toBase58() ?? null;
+
+  // Memory leak zırhı
   const isMounted = useRef(true);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -68,77 +101,87 @@ export function SquadCommandCenter({
     };
   }, []);
 
-  const showError = (msg: string) => {
+  const showError = useCallback((msg: string) => {
     if (!isMounted.current) return;
     setErrorMsg(msg);
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     errorTimerRef.current = setTimeout(() => {
       if (isMounted.current) setErrorMsg(null);
     }, 4000);
-  };
+  }, []);
 
-  const handleTransition = async (targetWallet: string, actionType: ActionType, memberId: string) => {
-    if (!signMessage) {
-      showError("Wallet not connected or doesn't support signing.");
-      return;
-    }
-
-    setProcessingId(memberId);
-    setErrorMsg(null);
-    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-
-    try {
-      // FIX: Browser uyumluluğu için fallback eklendi
-      const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).substring(2)}`;
-      const timestamp = Date.now();
-      
-      // FIX: Role ve Env çıkarıldı. Key'ler backend ile birebir aynı yapıldı.
-      const payloadObj = {
-        actionType: actionType,
-        actorWallet: currentUserWallet,
-        chain: "solana-mainnet",
-        domain: "pumpmatch-governance",
-        nonce: nonce,
-        projectId: projectId,
-        targetWallet: targetWallet,
-        timestamp: timestamp,
-        v: 1
-      };
-
-      const messageBytes = createCanonicalMessage(payloadObj);
-      const signatureBase58 = bs58.encode(await signMessage(messageBytes));
-
-      const result = await executeSquadTransitionAction({
-        projectId,
-        actorWallet: currentUserWallet,
-        targetWallet,
-        actionType,
-        nonce,
-        timestamp,
-        signature: signatureBase58
-      });
-
-      if (!isMounted.current) return;
-
-      if (result.success) {
-        onRefresh(); 
-      } else {
-        showError(result.message || "Protocol transition failed.");
+  const handleTransition = useCallback(
+    async (targetWalletRaw: string, actionType: ActionType, memberId: string) => {
+      if (!signMessage || !actorWallet) {
+        showError("Wallet not connected or doesn't support signing.");
+        return;
       }
-    } catch (error) {
-      console.error("Transition failed:", error);
-      if (!isMounted.current) return;
-      showError("Transaction rejected by user or network error.");
-    } finally {
-      if (isMounted.current) {
-        setProcessingId(null);
-      }
-    }
-  };
 
-  const activeMembers = members.filter(m => m.status === 'active');
-  const pendingRequests = members.filter(m => 
-    m.status === 'pending_application' || m.status === 'pending_invite'
+      const targetWallet = targetWalletRaw.trim();
+      if (!BASE58_RE.test(targetWallet)) {
+        showError("Invalid target wallet address.");
+        return;
+      }
+
+      setProcessingId(memberId);
+      setErrorMsg(null);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+
+      try {
+        const nonce =
+          globalThis.crypto?.randomUUID?.() ??
+          `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+        const timestamp = Date.now();
+
+        // ✅ V2 payload (server ile birebir)
+        const payloadObj = {
+          v: 2,
+          domain: DOMAIN,
+          chain: CHAIN,
+          projectId: projectId.trim(),
+          actorWallet, // source-of-truth
+          targetWallet,
+          actionType,
+          nonce,
+          timestamp,
+        } as const;
+
+        const messageBytes = createCanonicalMessage(payloadObj as unknown as Record<string, CanonicalValue>);
+        const signatureBase58 = bs58.encode(await signMessage(messageBytes));
+
+        const result = await executeSquadTransitionAction({
+          projectId: payloadObj.projectId,
+          actorWallet: payloadObj.actorWallet,
+          targetWallet: payloadObj.targetWallet,
+          actionType: payloadObj.actionType,
+          nonce: payloadObj.nonce,
+          timestamp: payloadObj.timestamp,
+          signature: signatureBase58,
+        });
+
+        if (!isMounted.current) return;
+
+        if (result.success) {
+          onRefresh();
+        } else {
+          showError(result.message || "Protocol transition failed.");
+        }
+      } catch (e) {
+        console.error("Transition failed:", e);
+        if (!isMounted.current) return;
+        showError("Transaction rejected by user or network error.");
+      } finally {
+        if (isMounted.current) setProcessingId(null);
+      }
+    },
+    [actorWallet, projectId, signMessage, onRefresh, showError]
+  );
+
+  const activeMembers = useMemo(() => members.filter((m) => m.status === "active"), [members]);
+  const pendingRequests = useMemo(
+    () => members.filter((m) => m.status === "pending_application" || m.status === "pending_invite"),
+    [members]
   );
 
   return (
@@ -165,7 +208,7 @@ export function SquadCommandCenter({
           }`}
         >
           <span className="flex items-center gap-2">
-            <Clock className="w-4 h-4" /> Pending Requests 
+            <Clock className="w-4 h-4" /> Pending Requests
             {pendingRequests.length > 0 && (
               <span className="bg-amber-500/20 text-amber-400 text-[10px] px-1.5 py-0.5 rounded-full ml-1">
                 {pendingRequests.length}
@@ -190,12 +233,14 @@ export function SquadCommandCenter({
             {activeMembers.length === 0 ? (
               <div className="text-center py-8 text-slate-500 text-sm">No active members yet.</div>
             ) : (
-              activeMembers.map(member => {
-                // FIX: Case-sensitive address checking for Base58
-                const isMe = member.wallet_address.trim() === currentUserWallet.trim();
+              activeMembers.map((member) => {
+                const isMe = member.wallet_address.trim() === (actorWallet ?? currentUserWallet).trim();
 
                 return (
-                  <div key={member.id} className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800/60 transition-colors">
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800/60 transition-colors"
+                  >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                         <Users className="w-5 h-5 text-emerald-400" />
@@ -205,25 +250,42 @@ export function SquadCommandCenter({
                         <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">{member.role}</p>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2">
                       {isFounder && !isMe && (
                         <button
-                          onClick={() => handleTransition(member.wallet_address, 'kick', member.id)}
+                          onClick={() => void handleTransition(member.wallet_address, "kick", member.id)}
                           disabled={processingId !== null}
-                          className={`p-2 rounded-lg transition-colors group relative ${processingId === member.id ? "text-rose-400" : "text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"}`}
+                          className={`p-2 rounded-lg transition-colors group relative ${
+                            processingId === member.id
+                              ? "text-rose-400"
+                              : "text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"
+                          }`}
                           title="Kick Member"
                         >
-                          {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserMinus className="w-4 h-4" />}
+                          {processingId === member.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <UserMinus className="w-4 h-4" />
+                          )}
                         </button>
                       )}
+
                       {!isFounder && isMe && (
                         <button
-                          onClick={() => handleTransition(member.wallet_address, 'leave', member.id)}
+                          onClick={() => void handleTransition(member.wallet_address, "leave", member.id)}
                           disabled={processingId !== null}
-                          className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"}`}
+                          className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                            processingId === member.id
+                              ? "text-slate-400 border-slate-600 cursor-not-allowed"
+                              : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+                          }`}
                         >
-                          {processingId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+                          {processingId === member.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <LogOut className="w-3.5 h-3.5" />
+                          )}
                           Leave Squad
                         </button>
                       )}
@@ -240,12 +302,10 @@ export function SquadCommandCenter({
             {pendingRequests.length === 0 ? (
               <div className="text-center py-8 text-slate-500 text-sm">No pending requests.</div>
             ) : (
-              pendingRequests.map(member => {
-                const isApplication = member.status === 'pending_application';
-                const isInvite = member.status === 'pending_invite';
-                
-                // FIX: Case-sensitive strict equality for Base58
-                const isMe = member.wallet_address.trim() === currentUserWallet.trim();
+              pendingRequests.map((member) => {
+                const isApplication = member.status === "pending_application";
+                const isInvite = member.status === "pending_invite";
+                const isMe = member.wallet_address.trim() === (actorWallet ?? currentUserWallet).trim();
 
                 const canApproveApp = isFounder && isApplication;
                 const canRevokeInvite = isFounder && isInvite;
@@ -254,15 +314,16 @@ export function SquadCommandCenter({
                 if (!isFounder && !isMe) return null;
 
                 return (
-                  <div key={member.id} className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-amber-500/20 hover:border-amber-500/40 transition-colors">
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-amber-500/20 hover:border-amber-500/40 transition-colors"
+                  >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
                         <Clock className="w-5 h-5 text-amber-400" />
                       </div>
                       <div>
-                        <p className="text-sm font-mono text-slate-200">
-                          {isMe ? "You" : maskWallet(member.wallet_address)}
-                        </p>
+                        <p className="text-sm font-mono text-slate-200">{isMe ? "You" : maskWallet(member.wallet_address)}</p>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">{member.role}</span>
                           <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
@@ -276,27 +337,59 @@ export function SquadCommandCenter({
                     <div className="flex items-center gap-2">
                       {canApproveApp && (
                         <>
-                          <button onClick={() => handleTransition(member.wallet_address, 'reject_app', member.id)} disabled={processingId !== null} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors">
+                          <button
+                            onClick={() => void handleTransition(member.wallet_address, "reject_app", member.id)}
+                            disabled={processingId !== null}
+                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                          >
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                           </button>
-                          <button onClick={() => handleTransition(member.wallet_address, 'approve_app', member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"}`}>
+                          <button
+                            onClick={() => void handleTransition(member.wallet_address, "approve_app", member.id)}
+                            disabled={processingId !== null}
+                            className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                              processingId === member.id
+                                ? "text-slate-400 border-slate-600 cursor-not-allowed"
+                                : "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                            }`}
+                          >
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Approve
                           </button>
                         </>
                       )}
 
                       {canRevokeInvite && (
-                        <button onClick={() => handleTransition(member.wallet_address, 'revoke_invite', member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"}`}>
+                        <button
+                          onClick={() => void handleTransition(member.wallet_address, "revoke_invite", member.id)}
+                          disabled={processingId !== null}
+                          className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                            processingId === member.id
+                              ? "text-slate-400 border-slate-600 cursor-not-allowed"
+                              : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+                          }`}
+                        >
                           {processingId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />} Revoke Invite
                         </button>
                       )}
 
                       {canAcceptInvite && (
                         <>
-                          <button onClick={() => handleTransition(member.wallet_address, 'reject_invite', member.id)} disabled={processingId !== null} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors">
+                          <button
+                            onClick={() => void handleTransition(member.wallet_address, "reject_invite", member.id)}
+                            disabled={processingId !== null}
+                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                          >
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                           </button>
-                          <button onClick={() => handleTransition(member.wallet_address, 'accept_invite', member.id)} disabled={processingId !== null} className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${processingId === member.id ? "text-slate-400 border-slate-600 cursor-not-allowed" : "text-blue-400 border-blue-500/30 hover:bg-blue-500/10"}`}>
+                          <button
+                            onClick={() => void handleTransition(member.wallet_address, "accept_invite", member.id)}
+                            disabled={processingId !== null}
+                            className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                              processingId === member.id
+                                ? "text-slate-400 border-slate-600 cursor-not-allowed"
+                                : "text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
+                            }`}
+                          >
                             {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Accept Invite
                           </button>
                         </>
