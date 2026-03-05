@@ -26,6 +26,8 @@ import type {
   Badge,
   BadgeCategory,
   BadgeId,
+  BehavioralMetrics,
+  ConfidenceLevel,
   MatchProfile,
   PumpStats,
   ScoreBreakdown,
@@ -34,6 +36,20 @@ import type {
   UserProfile,
   WalletAnalysis,
 } from "@/types";
+import { getTokenMarketSnapshot } from "@/lib/market-data";
+
+/**
+ * Backward-compat normalizer: ensures confidence exists on PumpStats.
+ * Cached responses stored before this field was added will lack it.
+ */
+function normalizePumpStats(ps: PumpStats | null): PumpStats | null {
+  if (!ps) return null;
+  if (ps.confidence) return ps;
+  let confidence: ConfidenceLevel = "LOW";
+  if ((ps.closedPositions ?? 0) >= 10) confidence = "HIGH";
+  else if ((ps.closedPositions ?? 0) >= 3) confidence = "MEDIUM";
+  return { ...ps, confidence };
+}
 
 // ──────────────────────────────────────────────────────────────
 // Production Grade: Upstash Redis Cache (15-min TTL)
@@ -276,6 +292,193 @@ function calculateBadgeScores(badgeIds: BadgeId[]): { systemScore: number; socia
 
 // Pump Match - Score label calculation removed (no client-side logic)
 
+// ──────────────────────────────────────────────────────────────
+// V8 Analysis Engine — Pipeline Stages
+// ──────────────────────────────────────────────────────────────
+
+/** Stage 1 output: raw on-chain data collected from Helius APIs */
+type OnchainCore = {
+  solBalance: number;
+  transactionCount: number;
+  fungibleTokens: number;
+  totalNfts: number;
+  totalAssets: number;
+  tokenDiversity: number;
+  activityCount: number;
+  pumpStats: PumpStats | null;
+  approxWalletAgeDays: number | null;
+  portfolioValueUsd: number | undefined;
+  scoreBreakdown: ScoreBreakdown;
+  badges: BadgeId[];
+  /** Up to 5 unique fungible token mints for market data enrichment */
+  fungibleMints: string[];
+};
+
+/**
+ * V8 Stage 1: Fetch all on-chain data in parallel.
+ * Pure data collection — no DB writes, no side-effects.
+ */
+async function fetchOnchainCore(trimmed: string): Promise<OnchainCore> {
+  const [assetsByOwnerResult, solBalance, txData, balancesData] = await Promise.all([
+    getAssetsByOwner(trimmed),
+    getSolBalance(trimmed),
+    getWalletTransactionData(trimmed),
+    getWalletBalances(trimmed).catch(() => null),
+  ]);
+
+  const transactionCount = txData.transactionCount;
+  const pumpStats = txData.pumpStats;
+  const assetsByOwner = assetsByOwnerResult || { items: [], total: 0 };
+
+  let fungibleTokens = 0;
+  let totalNfts = 0;
+
+  try {
+    const fungibleTokensResult = await searchAssets({
+      ownerAddress: trimmed,
+      tokenType: "fungible",
+      limit: 1,
+    });
+    if (fungibleTokensResult) {
+      const rawTotal = fungibleTokensResult.assets?.total ?? fungibleTokensResult.total;
+      fungibleTokens = typeof rawTotal === "number" && rawTotal >= 0 ? rawTotal : 0;
+    }
+  } catch (error) {
+    console.warn(`[fetchOnchainCore] Failed to fetch fungible tokens:`, error);
+  }
+
+  try {
+    const nonFungibleTokensResult = await searchAssets({
+      ownerAddress: trimmed,
+      tokenType: "nonFungible",
+      limit: 1,
+    });
+    if (nonFungibleTokensResult) {
+      const rawTotal = nonFungibleTokensResult.assets?.total ?? nonFungibleTokensResult.total;
+      totalNfts = typeof rawTotal === "number" && rawTotal >= 0 ? rawTotal : 0;
+    }
+  } catch (error) {
+    console.warn(`[fetchOnchainCore] Failed to fetch NFTs:`, error);
+  }
+
+  const totalAssets = fungibleTokens + totalNfts;
+  const tokenDiversity = computeTokenDiversity(assetsByOwner.items);
+  const activityCount = totalAssets + (transactionCount > 0 ? transactionCount : 0);
+  const scoreBreakdown = calculateScore(solBalance, transactionCount, tokenDiversity, pumpStats);
+  const badges = assignBadges(solBalance, transactionCount, tokenDiversity, pumpStats);
+
+  // Extract up to 5 unique fungible token mints for market data enrichment
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const mintSet = new Set<string>();
+  for (const item of assetsByOwner.items) {
+    if (mintSet.size >= 5) break;
+    if (
+      (item.interface === "FungibleToken" || item.interface === "FungibleAsset") &&
+      item.id &&
+      item.id !== WSOL
+    ) {
+      mintSet.add(item.id);
+    }
+  }
+
+  return {
+    solBalance,
+    transactionCount,
+    fungibleTokens,
+    totalNfts,
+    totalAssets,
+    tokenDiversity,
+    activityCount,
+    pumpStats,
+    approxWalletAgeDays: txData.approxWalletAgeDays,
+    portfolioValueUsd: balancesData?.totalUsdValue,
+    scoreBreakdown,
+    badges,
+    fungibleMints: [...mintSet],
+  };
+}
+
+/**
+ * V8 Stage 2: Derive behavioral metrics from on-chain core data.
+ * Uses only data already fetched — zero additional API calls.
+ */
+function deriveBehavioralMetrics(core: OnchainCore): BehavioralMetrics | undefined {
+  const { pumpStats, transactionCount, approxWalletAgeDays } = core;
+
+  // Without pumpStats we cannot derive meaningful behavioral metrics
+  if (!pumpStats || pumpStats.pumpMintsTouched < 1) {
+    return undefined;
+  }
+
+  const jeetIndex = pumpStats.jeetScore;
+  const rugExposureIndex = pumpStats.rugMagnetScore;
+  const avgHoldingTimeSec = pumpStats.medianHoldTimeSeconds > 0
+    ? pumpStats.medianHoldTimeSeconds
+    : undefined;
+
+  // Trade frequency: closedPositions relative to wallet age (days active)
+  let tradeFreqScore: number | undefined;
+  if (approxWalletAgeDays != null && approxWalletAgeDays > 0) {
+    const tradesPerDay = pumpStats.closedPositions / approxWalletAgeDays;
+    // Scale: 0 trades/day = 0, 5+ trades/day = 100
+    tradeFreqScore = Math.min(100, Math.round(tradesPerDay * 20));
+  } else if (transactionCount > 0) {
+    // Fallback: use raw closed positions as a rough proxy
+    tradeFreqScore = Math.min(100, pumpStats.closedPositions * 5);
+  }
+
+  // Build confidence label based on available data sources
+  const sources: string[] = ["Helius Enhanced TX"];
+  if (pumpStats.closedPositions >= 3) sources.push("Pump Simulation");
+  if (approxWalletAgeDays != null) sources.push("Wallet Age");
+  const confidenceLabel = sources.join(" + ");
+
+  return {
+    jeetIndex,
+    rugExposureIndex,
+    avgHoldingTimeSec,
+    tradeFreqScore,
+    confidenceLabel,
+  };
+}
+
+/**
+ * V8 Stage 3: Enrich with DexScreener market data.
+ * Fail-safe: never throws, never slows core pipeline.
+ * Uses Promise.allSettled + per-mint timeout (4s) + mint cap (5).
+ */
+async function enrichWithMarketData(
+  walletAnalysis: WalletAnalysis,
+  core: OnchainCore,
+): Promise<WalletAnalysis> {
+  try {
+    const mints = core.fungibleMints;
+    if (mints.length === 0) return walletAnalysis;
+
+    const results = await Promise.allSettled(
+      mints.map((m) => getTokenMarketSnapshot(m)),
+    );
+
+    const topTokens = results
+      .filter((r): r is PromiseFulfilledResult<import("@/types").MarketSnapshot | null> =>
+        r.status === "fulfilled" && r.value != null,
+      )
+      .map((r) => r.value!)
+      .sort((a, b) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0))
+      .slice(0, 3);
+
+    if (topTokens.length === 0) return walletAnalysis;
+
+    return { ...walletAnalysis, marketData: { topTokens } };
+  } catch {
+    return walletAnalysis;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Main Entry Point
+// ──────────────────────────────────────────────────────────────
+
 export async function analyzeWallet(address: string, userIntent?: UserIntent): Promise<AnalyzeWalletResponse> {
   // Universal normalization + validation (strips web3:solana: prefix, validates base58)
   const trimmed = normalizeAndValidateSolanaAddress(address);
@@ -289,17 +492,24 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
   }
 
   // SECURITY (VULN-04): Cache key is address-only — NOT intent-dependent.
-  // Intent-based cache keys allowed 5x bypass (one per intent value), exhausting
-  // the Helius API key. Intent is applied to the cached response without re-fetching.
   const cacheKey = trimmed;
   const cached = await getCachedAnalysis(cacheKey);
   if (cached && Date.now() - cached.timestamp < ANALYSIS_CACHE_TTL_MS) {
     // eslint-disable-next-line no-console
     console.log(`[analyzeWallet] Cache HIT for ${trimmed.slice(0, 8)}... (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
 
+    // Backward-compat: normalize pumpStats.confidence for pre-V8 cached responses
+    const cachedWa = cached.response.walletAnalysis;
+    const normalizedPs = normalizePumpStats(cachedWa.pumpStats);
+    const needsNormalize = normalizedPs !== cachedWa.pumpStats;
+
     // If intent changed, update it in the cached response without re-fetching
-    if (userIntent && cached.response.walletAnalysis.intent !== userIntent) {
-      const updatedAnalysis = { ...cached.response.walletAnalysis, intent: userIntent };
+    if ((userIntent && cachedWa.intent !== userIntent) || needsNormalize) {
+      const updatedAnalysis = {
+        ...cachedWa,
+        ...(userIntent ? { intent: userIntent } : {}),
+        ...(needsNormalize ? { pumpStats: normalizedPs } : {}),
+      };
       const updatedMatches = getMatches(updatedAnalysis);
       return { ...cached.response, walletAnalysis: updatedAnalysis, matches: updatedMatches };
     }
@@ -314,69 +524,15 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
   }
 
   try {
-    // Parallel data fetching (Enhanced Transactions API eliminates N+1 pattern)
-    // getWalletBalances is belt-and-suspenders wrapped: returns null internally on any
-    // error AND has .catch(() => null) so a future refactor can't break the pipeline.
-    const [assetsByOwnerResult, solBalance, txData, balancesData] = await Promise.all([
-      getAssetsByOwner(trimmed),
-      getSolBalance(trimmed),
-      getWalletTransactionData(trimmed), // Unified: count + wallet age + funding source
-      getWalletBalances(trimmed).catch(() => null), // Non-critical: portfolio USD value
-    ]);
+    // ── V8 Stage 1: Fetch on-chain core ──
+    const core = await fetchOnchainCore(trimmed);
 
-    const transactionCount = txData.transactionCount;
-    const firstTxData = txData;
-    const pumpStats = txData.pumpStats;
+    // ── V8 Stage 2: Derive behavioral metrics ──
+    const behavioral = deriveBehavioralMetrics(core);
 
-    // getAssetsByOwner null fallback
-    const assetsByOwner = assetsByOwnerResult || { items: [], total: 0 };
-
-    // Fetch fungible and non-fungible counts via searchAssets
-    let fungibleTokens = 0;
-    let totalNfts = 0;
-
-    try {
-      const fungibleTokensResult = await searchAssets({
-        ownerAddress: trimmed,
-        tokenType: "fungible",
-        limit: 1,
-      });
-
-      if (fungibleTokensResult) {
-        const rawTotal =
-          fungibleTokensResult.assets?.total ?? fungibleTokensResult.total;
-        fungibleTokens =
-          typeof rawTotal === "number" && rawTotal >= 0 ? rawTotal : 0;
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn(`[AnalyzeWallet] Failed to fetch fungible tokens:`, error);
-      fungibleTokens = 0;
-    }
-
-    try {
-      const nonFungibleTokensResult = await searchAssets({
-        ownerAddress: trimmed,
-        tokenType: "nonFungible",
-        limit: 1,
-      });
-
-      if (nonFungibleTokensResult) {
-        const rawTotal =
-          nonFungibleTokensResult.assets?.total ?? nonFungibleTokensResult.total;
-        totalNfts = typeof rawTotal === "number" && rawTotal >= 0 ? rawTotal : 0;
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn(`[AnalyzeWallet] Failed to fetch NFTs:`, error);
-      totalNfts = 0;
-    }
-
-    const totalAssets = fungibleTokens + totalNfts;
-    const tokenDiversity = computeTokenDiversity(assetsByOwner.items);
-    const activityCount = totalAssets + (transactionCount > 0 ? transactionCount : 0);
-    const scoreBreakdown = calculateScore(solBalance, transactionCount, tokenDiversity, pumpStats);
-    const badges = assignBadges(solBalance, transactionCount, tokenDiversity, pumpStats);
+    const { solBalance, transactionCount, fungibleTokens, totalNfts, totalAssets,
+            tokenDiversity, activityCount, pumpStats, portfolioValueUsd } = core;
+    let { scoreBreakdown, badges } = core;
 
     const analysisResult: AnalyzeWalletResult = {
       address: trimmed,
@@ -394,10 +550,10 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     const score = trustScore;
     const scoreLabel = trustScore >= 80 ? "Strong Activity" : trustScore >= 50 ? "Moderate Activity" : "Low Activity";
 
-    // Opt-In Network Architecture - Check if user is registered (In-Memory Check removed, now relies on DB sync)
+    // Opt-In Network Architecture - Check if user is registered
     const isRegistered = await isUserRegistered(trimmed);
 
-    // Community badge: For registered users use real endorsement count instead of mock heuristic
+    // Community badge: For registered users use real endorsement count
     if (isRegistered) {
       const endorsementCount = await getEndorsementCount(trimmed);
       const badgeIdx = badges.indexOf('community_trusted');
@@ -410,13 +566,7 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
 
     const { systemScore, socialScore } = calculateBadgeScores(badges);
 
-    // ──────────────────────────────────────────────────────────────
     // SECURITY (VULN-03): Only update trust score for ALREADY-REGISTERED users.
-    // Previously, every analyzeWallet call upserted ANY wallet into the DB —
-    // allowing an attacker to spam thousands of random wallets into Supabase.
-    // Now: guest wallets are analyzed in memory only, DB is not touched.
-    // ──────────────────────────────────────────────────────────────
-    // ── Architect Mode: skip DB write to avoid persisting fake scores ──
     const architectActive = isArchitect(trimmed);
     if (isRegistered && !architectActive) {
       try {
@@ -432,7 +582,6 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
         console.error("[analyzeWallet] Supabase Sync Failed:", dbError);
       }
     }
-    // ──────────────────────────────────────────────────────────────
 
     // ── Architect Mode: in-memory overrides (never persisted to DB) ──
     let finalTrustScore = trustScore;
@@ -462,7 +611,7 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       finalSocialScore = archBadgeScores.socialScore;
     }
 
-    const walletAnalysis: WalletAnalysis = {
+    let walletAnalysis: WalletAnalysis = {
       address: trimmed,
       solBalance,
       tokenCount: fungibleTokens,
@@ -479,10 +628,14 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       socialScore: finalSocialScore,
       intent: userIntent,
       isRegistered,
-      approxWalletAge: firstTxData.approxWalletAgeDays ?? undefined,
-      pumpStats,
-      portfolioValueUsd: balancesData?.totalUsdValue,
+      approxWalletAge: core.approxWalletAgeDays ?? undefined,
+      pumpStats: normalizePumpStats(pumpStats),
+      portfolioValueUsd,
+      behavioral,
     };
+
+    // ── V8 Stage 3: Enrich with market data (stub — no-op for now) ──
+    walletAnalysis = await enrichWithMarketData(walletAnalysis, core);
 
     // Match Engine: Calculate matches (read-only, mock data for preview)
     const matches = getMatches(walletAnalysis);

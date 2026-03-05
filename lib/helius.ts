@@ -1,5 +1,5 @@
 import "server-only";
-import type { PumpStats } from "@/types";
+import type { ConfidenceLevel, PumpStats } from "@/types";
 
 // SECURITY: Server-only API key. NEVER use NEXT_PUBLIC_ prefix for Helius key —
 // that would expose it to the browser bundle and allow API abuse.
@@ -11,11 +11,11 @@ if (!HELIUS_API_KEY || typeof HELIUS_API_KEY !== "string" || HELIUS_API_KEY.trim
 }
 
 const HELIUS_RPC_URL = HELIUS_API_KEY
-  ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY.trim()}`
+  ? `https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY.trim()}`
   : null;
 
-// Helius Enhanced Transactions API (REST, not RPC)
-const HELIUS_API_BASE = "https://api.helius.xyz";
+// Helius Enhanced Transactions API (Gatekeeper Beta)
+const HELIUS_API_BASE = "https://beta.helius-rpc.com";
 
 // Types
 type JsonRpcError = {
@@ -93,9 +93,11 @@ export type EnhancedTransaction = {
   events?: Record<string, unknown>;
 };
 
+const MAX_RETRIES = 3;
+
 /**
- * Centralized RPC caller with robust error handling.
- * Returns null on error instead of throwing.
+ * Centralized RPC caller with robust error handling and exponential backoff.
+ * Retries on 429 (rate limit) and 5xx (server error). Returns null on error.
  */
 async function callHeliusRpc<T>(method: string, params: unknown): Promise<T | null> {
   if (!HELIUS_RPC_URL) {
@@ -104,54 +106,81 @@ async function callHeliusRpc<T>(method: string, params: unknown): Promise<T | nu
     return null;
   }
 
-  try {
-    const response = await fetch(HELIUS_RPC_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: method,
-        method,
-        params,
-      }),
-    });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(HELIUS_RPC_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: method,
+          method,
+          params,
+        }),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        const json = (await response.json()) as JsonRpcResponse<T>;
+
+        if (json.error) {
+          // eslint-disable-next-line no-console
+          console.error(`[Helius RPC] Error response for ${method}:`, json.error);
+          return null;
+        }
+
+        if (!json.result) {
+          // eslint-disable-next-line no-console
+          console.error(`[Helius RPC] Missing result for ${method}`);
+          return null;
+        }
+
+        return json.result;
+      }
+
+      // Rate limit — respect Retry-After header or exponential backoff
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.pow(2, attempt) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[Helius RPC] 429 for ${method}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((res) => setTimeout(res, delay));
+        continue;
+      }
+
+      // Server error — exponential backoff
+      if (response.status >= 500) {
+        const delay = Math.pow(2, attempt) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[Helius RPC] ${response.status} for ${method}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((res) => setTimeout(res, delay));
+        continue;
+      }
+
+      // Client error (400, 401, etc.) — do not retry
       const errorText = await response.text();
       // eslint-disable-next-line no-console
       console.error(`[Helius RPC] Request failed for ${method}:`, {
         status: response.status,
         statusText: response.statusText,
-        body: errorText.substring(0, 200), // Limit error text length
+        body: errorText.substring(0, 200),
       });
       return null;
-    }
-
-    const json = (await response.json()) as JsonRpcResponse<T>;
-
-    if (json.error) {
+    } catch (error) {
       // eslint-disable-next-line no-console
-      console.error(`[Helius RPC] Error response for ${method}:`, json.error);
+      console.error(`[Helius RPC] Exception calling ${method} (attempt ${attempt + 1}/${MAX_RETRIES}):`, {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise((res) => setTimeout(res, Math.pow(2, attempt) * 1000));
+        continue;
+      }
       return null;
     }
-
-    if (!json.result) {
-      // eslint-disable-next-line no-console
-      console.error(`[Helius RPC] Missing result for ${method}`);
-      return null;
-    }
-
-    return json.result;
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(`[Helius RPC] Exception calling ${method}:`, {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    return null;
   }
+
+  return null;
 }
 
 /**
@@ -288,51 +317,75 @@ export async function getWalletBalances(
     return null;
   }
 
-  try {
+  const url = new URL(
+    `${HELIUS_API_BASE}/v1/wallet/${address}/balances`,
+  );
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("showNfts", "false");
+  url.searchParams.set("showZeroBalance", "false");
+  url.searchParams.set("showNative", "true");
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // Recreate AbortController per attempt so retries get a fresh signal
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), WALLET_BALANCES_TIMEOUT_MS);
 
-    const url = new URL(
-      `${HELIUS_API_BASE}/v1/wallet/${address}/balances`,
-    );
-    url.searchParams.set("limit", "1");
-    url.searchParams.set("showNfts", "false");
-    url.searchParams.set("showZeroBalance", "false");
-    url.searchParams.set("showNative", "true");
+    try {
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: { "X-Api-Key": apiKey.trim() },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      headers: { "X-Api-Key": apiKey.trim() },
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeout));
+      if (res.ok) {
+        const json = (await res.json()) as { totalUsdValue?: unknown };
 
-    if (!res.ok) {
+        const total =
+          typeof json.totalUsdValue === "number"
+            ? json.totalUsdValue
+            : Number(json.totalUsdValue);
+
+        if (!Number.isFinite(total)) return null;
+
+        // 0 is a valid portfolio value (empty wallet)
+        return { totalUsdValue: total };
+      }
+
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("Retry-After");
+        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.pow(2, attempt) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[getWalletBalances] 429, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+
+      if (res.status >= 500) {
+        const delay = Math.pow(2, attempt) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[getWalletBalances] ${res.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+
+      // Client error — do not retry
       // eslint-disable-next-line no-console
-      console.error(
-        `[getWalletBalances] HTTP ${res.status} for ${address.slice(0, 8)}...`,
-      );
+      console.error(`[getWalletBalances] HTTP ${res.status} for ${address.slice(0, 8)}...`);
+      return null;
+    } catch (error) {
+      clearTimeout(timeout);
+      // eslint-disable-next-line no-console
+      console.error(`[getWalletBalances] Exception (attempt ${attempt + 1}/${MAX_RETRIES}):`, error instanceof Error ? error.message : String(error));
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+        continue;
+      }
       return null;
     }
-
-    const json = (await res.json()) as { totalUsdValue?: unknown };
-
-    const total =
-      typeof json.totalUsdValue === "number"
-        ? json.totalUsdValue
-        : Number(json.totalUsdValue);
-
-    if (!Number.isFinite(total)) return null;
-
-    // 0 is a valid portfolio value (empty wallet)
-    return { totalUsdValue: total };
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(
-      "[getWalletBalances] Exception:",
-      error instanceof Error ? error.message : String(error),
-    );
-    return null;
   }
+
+  return null;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -363,43 +416,64 @@ async function fetchEnhancedTransactionPage(
     return [];
   }
 
-  try {
-    const limit = Math.min(options?.limit ?? 100, 100);
-    const url = new URL(
-      `${HELIUS_API_BASE}/v0/addresses/${address}/transactions`,
-    );
-    url.searchParams.set("api-key", apiKey.trim());
-    url.searchParams.set("limit", String(limit));
-    if (options?.before) {
-      url.searchParams.set("before", options.before);
-    }
+  const limit = Math.min(options?.limit ?? 100, 100);
+  const url = new URL(
+    `${HELIUS_API_BASE}/v0/addresses/${address}/transactions`,
+  );
+  url.searchParams.set("api-key", apiKey.trim());
+  url.searchParams.set("limit", String(limit));
+  if (options?.before) {
+    url.searchParams.set("before", options.before);
+  }
 
-    const response = await fetch(url.toString());
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url.toString());
 
-    if (!response.ok) {
+      if (response.ok) {
+        const data = await response.json();
+        return Array.isArray(data) ? (data as EnhancedTransaction[]) : [];
+      }
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.pow(2, attempt) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[Helius Enhanced API] 429, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((res) => setTimeout(res, delay));
+        continue;
+      }
+
+      if (response.status >= 500) {
+        const delay = Math.pow(2, attempt) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[Helius Enhanced API] ${response.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((res) => setTimeout(res, delay));
+        continue;
+      }
+
+      // Client error — do not retry
       const errorText = await response.text();
       // eslint-disable-next-line no-console
-      console.error(
-        `[Helius Enhanced API] HTTP ${response.status}:`,
-        errorText.substring(0, 200),
-      );
+      console.error(`[Helius Enhanced API] HTTP ${response.status}:`, errorText.substring(0, 200));
+      return [];
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(`[Helius Enhanced API] Exception (attempt ${attempt + 1}/${MAX_RETRIES}):`, error instanceof Error ? error.message : String(error));
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise((res) => setTimeout(res, Math.pow(2, attempt) * 1000));
+        continue;
+      }
       return [];
     }
-
-    const data = await response.json();
-    return Array.isArray(data) ? (data as EnhancedTransaction[]) : [];
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[Helius Enhanced API] Exception:`,
-      error instanceof Error ? error.message : String(error),
-    );
-    return [];
   }
+
+  return [];
 }
 
 const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const PUMP_FUN_EPOCH_SEC = 1704067200; // 2024-01-01 UTC, seconds
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 // Zaman Birimi Zırhı (Helius bazen ms, bazen sec dönebilir)
 function toSec(ts: number): number {
@@ -470,7 +544,7 @@ function simulatePump(
 
     for (const tr of tx.tokenTransfers) {
       const mint = tr?.mint;
-      if (!mint) continue;
+      if (!mint || mint === WSOL_MINT) continue; // WSOL is never a pump token
 
       // ✅ KRİTİK DÜZELTME: Sadece gerçek pump ekosistemi, mint.endsWith("pump") FALAN YOK!
       const isPumpMint = pumpTx || pumpUniverse.has(mint);
@@ -500,7 +574,7 @@ function simulatePump(
         st.openTs = null;
       }
 
-      st.balance = Math.abs(nextBal) <= EPSILON ? 0 : nextBal;
+      st.balance = nextBal <= EPSILON ? 0 : nextBal;
       states.set(mint, st);
     }
   }
@@ -519,7 +593,7 @@ function simulatePump(
 
     if (st.openTs != null) {
       const hold = Math.max(0, nowSec - st.openTs);
-      holds.push(hold);
+      // Open positions excluded from holds[] — median must reflect closed exits only
       if (hold > 3 * 24 * 60 * 60) dead++; // 3 günden eskiyse ölü
     }
   }
@@ -559,7 +633,10 @@ export async function getWalletTransactionData(address: string): Promise<{
         if (isPumpTx(tx)) {
           pumpTxCountSoFar++;
           for (const tr of tx.tokenTransfers) {
-            if (tr?.mint) pumpUniverse.add(tr.mint);
+            // Only add mints that involve this wallet and are not WSOL
+            if (tr?.mint && tr.mint !== WSOL_MINT && (tr.toUserAccount === address || tr.fromUserAccount === address)) {
+              pumpUniverse.add(tr.mint);
+            }
           }
         }
       }
@@ -609,8 +686,13 @@ export async function getWalletTransactionData(address: string): Promise<{
     }
 
     const medianHold = Math.round(median(holds));
-    const jeetScore = jeetScoreFromMedianHold(medianHold);
+    // No closed positions → neutral jeet score (not punished for holding)
+    const jeetScore = closedPositions === 0 ? 50 : jeetScoreFromMedianHold(medianHold);
     const rugMagnetScore = Math.round((dead / pumpMintsTouched) * 100);
+
+    let confidence: ConfidenceLevel = "LOW";
+    if (closedPositions >= 10) confidence = "HIGH";
+    else if (closedPositions >= 3) confidence = "MEDIUM";
 
     return {
       transactionCount,
@@ -623,6 +705,7 @@ export async function getWalletTransactionData(address: string): Promise<{
         medianHoldTimeSeconds: medianHold,
         jeetScore,
         rugMagnetScore,
+        confidence,
       },
     };
   } catch (error) {

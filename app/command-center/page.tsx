@@ -157,10 +157,24 @@ function formatHoldTime(seconds: number): string {
   return `${(seconds / 3600).toFixed(1)} hours`;
 }
 
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toFixed(0);
+}
+
 function rugRiskLabel(score: number): string {
   if (score >= 60) return "High risk";
   if (score >= 30) return "Medium risk";
   return "Low risk";
+}
+
+function ConfidenceBadge({ level }: { level?: "LOW" | "MEDIUM" | "HIGH" }) {
+  if (!level) return null;
+  const base = "ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase border";
+  if (level === "HIGH") return <span className={`${base} bg-emerald-500/10 text-emerald-300 border-emerald-500/30`}>High</span>;
+  if (level === "MEDIUM") return <span className={`${base} bg-amber-500/10 text-amber-300 border-amber-500/30`}>Med</span>;
+  return <span className={`${base} bg-slate-700/30 text-slate-300 border-slate-600/40`}>Low</span>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,12 +439,21 @@ function WalletAnalysisCard({
   const hasData = analysisData !== null;
   const analyzeDisabled = !canAnalyze || isAnalyzing;
 
+  const beh = hasData ? analysisData.behavioral : undefined;
+  const topToken = hasData ? analysisData.marketData?.topTokens?.[0] : undefined;
   const metrics = hasData
     ? [
         { label: "Token Diversity", value: `${analysisData.tokenDiversity} assets` },
-        { label: "Closed Positions", value: analysisData.pumpStats ? `${analysisData.pumpStats.closedPositions} trades` : "—" },
-        { label: "Avg Hold Time", value: analysisData.pumpStats ? formatHoldTime(analysisData.pumpStats.medianHoldTimeSeconds) : "—" },
-        { label: "Rug Magnet", value: analysisData.pumpStats ? rugRiskLabel(analysisData.pumpStats.rugMagnetScore) : "—" },
+        { label: "Jeet Index", value: beh ? `${beh.jeetIndex}/100` : "—", confidence: analysisData.pumpStats?.confidence },
+        { label: "Rug Exposure", value: beh ? `${beh.rugExposureIndex}/100` : "—" },
+        { label: "Avg Hold Time", value: beh?.avgHoldingTimeSec != null ? formatHoldTime(beh.avgHoldingTimeSec) : "—" },
+        { label: "Trade Frequency", value: beh?.tradeFreqScore != null ? `${beh.tradeFreqScore}/100` : "—" },
+        {
+          label: "Top Token",
+          value: topToken?.priceUsd != null
+            ? `$${topToken.priceUsd < 0.01 ? topToken.priceUsd.toExponential(2) : topToken.priceUsd.toFixed(2)}${topToken.liquidityUsd != null ? ` · $${formatCompact(topToken.liquidityUsd)} liq` : ""}`
+            : "—",
+        },
       ]
     : null;
 
@@ -488,7 +511,7 @@ function WalletAnalysisCard({
 
       {/* Quick metrics grid — only shown after analysis */}
       {metrics && (
-        <div className="grid grid-cols-2 gap-2 mb-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-5">
           {metrics.map((m) => (
             <div
               key={m.label}
@@ -497,7 +520,10 @@ function WalletAnalysisCard({
               <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
                 {m.label}
               </p>
-              <p className="text-xs font-semibold text-slate-300">{m.value}</p>
+              <p className="text-xs font-semibold text-slate-300">
+                {m.value}
+                {"confidence" in m && <ConfidenceBadge level={m.confidence} />}
+              </p>
             </div>
           ))}
         </div>

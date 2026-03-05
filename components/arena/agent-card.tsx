@@ -124,18 +124,22 @@ export function AgentCard({ agent, index }: AgentCardProps) {
       </div>
 
       {/* Trust Score + Network Bonus */}
-      <div className="grid grid-cols-2 gap-2 sm:block sm:text-right flex-shrink-0 sm:pl-2">
-        <div className="bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-4 flex-shrink-0 sm:pl-2">
+        <div className="relative bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right overflow-hidden">
+          {/* Intel Radar ping */}
+          <div className="absolute inset-0 rounded-lg pointer-events-none sm:hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-400/5 to-transparent animate-pulse" />
+          </div>
           <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 sm:hidden">
             Trust Score
           </p>
           <span
             className={`text-lg sm:text-2xl font-black tabular-nums tracking-tighter leading-none ${
               displayScore >= 80
-                ? "text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.45)]"
+                ? "text-emerald-300 drop-shadow-[0_0_12px_rgba(16,185,129,0.5)]"
                 : displayScore >= 50
-                  ? "text-amber-300 drop-shadow-[0_0_6px_rgba(251,191,36,0.25)]"
-                  : "text-rose-400"
+                  ? "text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]"
+                  : "text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.3)]"
             }`}
           >
             {displayScore}
@@ -144,14 +148,20 @@ export function AgentCard({ agent, index }: AgentCardProps) {
             Trust
           </p>
         </div>
-        <div className="bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none">
+        <div className="bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right">
           <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 sm:hidden">
             Network
           </p>
-          <p className="text-sm font-mono text-emerald-400 sm:text-[9px] font-bold sm:mt-0.5 animate-pulse">
+          <p className="text-sm font-mono tabular-nums text-emerald-400 sm:text-[9px] font-bold sm:mt-0.5 animate-pulse">
             +5 Bonus
           </p>
         </div>
+        {/* Recruit CTA */}
+        <button
+          className="col-span-2 sm:col-auto border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/60 hover:shadow-[0_0_15px_rgba(168,85,247,0.15)] rounded-lg px-4 py-2 min-h-[44px] text-xs font-semibold transition-all duration-200"
+        >
+          Recruit
+        </button>
       </div>
 
       {/* Rank 1 ambient glow */}

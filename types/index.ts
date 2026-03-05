@@ -16,12 +16,15 @@ export type UserIntent = "BUILD_SQUAD" | "FIND_FUNDING" | "HIRE_TALENT" | "JOIN_
 // VERIFIED (Top) > REACHABLE > GHOST (Default)
 export type IdentityState = "VERIFIED" | "REACHABLE" | "GHOST";
 
+export type ConfidenceLevel = "LOW" | "MEDIUM" | "HIGH";
+
 export type PumpStats = {
   pumpMintsTouched: number;
   closedPositions: number;
   medianHoldTimeSeconds: number;
   jeetScore: number;
   rugMagnetScore: number;
+  confidence?: ConfidenceLevel;
 };
 
 export type ScoreBreakdown = {
@@ -136,6 +139,28 @@ export type WalletAnalysis = {
   pumpStats: PumpStats | null;
   // Helius Wallet Balances API — total USD value of all token holdings (hourly pricing, beta)
   portfolioValueUsd?: number; // undefined if API unavailable or failed
+  // V8 Analysis Engine: behavioral metrics derived from on-chain data
+  behavioral?: BehavioralMetrics;
+  // V8 Analysis Engine: market data from DexScreener (optional, may be absent in cached responses)
+  marketData?: { topTokens: MarketSnapshot[] };
+};
+
+// Re-export MarketSnapshot from types for convenience (canonical definition in lib/market-data.ts)
+export type MarketSnapshot = {
+  mint: string;
+  priceUsd?: number;
+  liquidityUsd?: number;
+  fdvUsd?: number;
+  updatedAt: number;
+};
+
+// V8 Analysis Engine: on-chain behavioral profile
+export type BehavioralMetrics = {
+  jeetIndex: number;           // 0-100: higher = more jeet-like behavior
+  rugExposureIndex: number;    // 0-100: higher = more rug exposure
+  avgHoldingTimeSec?: number;  // median holding time in seconds (proxy from pumpStats)
+  tradeFreqScore?: number;     // 0-100: trade frequency relative to wallet age
+  confidenceLabel: string;     // describes data sources used for derivation
 };
 
 export type MatchProfile = {

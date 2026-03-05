@@ -93,43 +93,28 @@ export async function verifyLegacySignature(
     return false;
   }
 }
-// ─── 3. PUMPMATCH V1.5 CANONICAL JSON ENGINE (Squad İşlemleri İçin) ───
-export interface PumpMatchPayload {
-  action: string;
-  chain: string;
-  domain: string;
-  env: string;
-  nonce: string;
-  project: string;
-  role: string;
-  target: string;
-  timestamp: number;
-  v: number;
-}
+// ─── 3. PUMPMATCH CANONICAL JSON ENGINE (Shared Implementation) ───
+// Types and canonical generators are defined in signature-shared.ts (client-safe).
+// Re-export them so existing imports from "@/lib/signature" keep working.
+export {
+  generateCanonicalMessageV1 as generateCanonicalMessage,
+  generateCanonicalMessageV2,
+  type PumpMatchPayload,
+  type SquadTransitionPayloadV2,
+} from "@/lib/signature-shared";
 
-export function generateCanonicalMessage(payload: PumpMatchPayload): Uint8Array {
-  // ASCII-based deterministic key ordering
-  type ScalarValue = string | number | boolean | null;
-  const typedPayload = payload as unknown as Record<string, ScalarValue>;
-  const sortedKeys = Object.keys(typedPayload).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-
-  const canonicalObject: Record<string, ScalarValue> = {};
-  for (const key of sortedKeys) {
-    const value = typedPayload[key];
-    if (typeof value === 'object' && value !== null) {
-      throw new Error("Nested objects are not allowed in V1 Canonical JSON.");
-    }
-    canonicalObject[key] = value;
-  }
-
-  const canonicalString = JSON.stringify(canonicalObject);
-  return new TextEncoder().encode(canonicalString);
-}
+import {
+  generateCanonicalMessageV1,
+} from "@/lib/signature-shared";
+import type {
+  PumpMatchPayload as _PumpMatchPayload,
+  SquadTransitionPayloadV2 as _SquadTransitionPayloadV2,
+} from "@/lib/signature-shared";
 
 export async function verifyWalletSignature(
-  publicKeyBase58: string, 
-  signatureBase58: string, 
-  expectedPayload: PumpMatchPayload
+  publicKeyBase58: string,
+  signatureBase58: string,
+  expectedPayload: _PumpMatchPayload
 ): Promise<{ isValid: boolean; derivedActor?: string; error?: string }> {
   try {
     if (expectedPayload.v !== 1) return { isValid: false, error: 'Unsupported protocol version.' };
@@ -140,12 +125,12 @@ export async function verifyWalletSignature(
 
     const now = Date.now();
     const ts = expectedPayload.timestamp;
-    
+
     if (!ts || typeof ts !== 'number') return { isValid: false, error: 'Invalid timestamp.' };
     if (ts > now + 30 * 1000) return { isValid: false, error: 'Clock drift: Timestamp in future.' };
     if (ts < now - 5 * 60 * 1000) return { isValid: false, error: 'Signature expired.' };
 
-    const messageBytes = generateCanonicalMessage(expectedPayload);
+    const messageBytes = generateCanonicalMessageV1(expectedPayload);
     const publicKeyBytes = base58Decode(publicKeyBase58.trim());
     const signatureBytes = base58Decode(signatureBase58.trim());
 
@@ -177,24 +162,12 @@ export async function verifyWalletSignature(
   }
 }
 
-// ─── 4. SQUAD TRANSITION V2 (Byte-Native, verifyLegacySignature ile) ───
-export type SquadTransitionPayloadV2 = {
-  v: number;
-  domain: string;
-  chain: string;
-  projectId: string;
-  actorWallet: string;
-  targetWallet: string;
-  actionType: string;
-  nonce: string;
-  timestamp: number;
-};
-
+// ─── 4. SQUAD TRANSITION V2 VALIDATION ───
 const SQUAD_V2_MAX_AGE_MS = 5 * 60 * 1000;
 const SQUAD_V2_FUTURE_SKEW_MS = 30 * 1000;
 
 export function validateSquadTransitionPayloadV2(
-  payload: SquadTransitionPayloadV2
+  payload: _SquadTransitionPayloadV2
 ): { ok: true } | { ok: false; error: string } {
   if (payload.v !== 2) return { ok: false, error: "Unsupported payload version." };
   if (payload.domain !== "pumpmatch-governance") return { ok: false, error: "Invalid domain." };
@@ -204,17 +177,4 @@ export function validateSquadTransitionPayloadV2(
   if (ts > now + SQUAD_V2_FUTURE_SKEW_MS) return { ok: false, error: "Timestamp in future." };
   if (now - ts > SQUAD_V2_MAX_AGE_MS) return { ok: false, error: "Signature expired." };
   return { ok: true };
-}
-
-export function generateCanonicalMessageV2(payload: SquadTransitionPayloadV2): Uint8Array {
-  type Scalar = string | number | boolean | null;
-  const record = payload as unknown as Record<string, Scalar>;
-  const sortedKeys = Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const canonical: Record<string, Scalar> = {};
-  for (const k of sortedKeys) {
-    const v = record[k];
-    if (typeof v === "object" && v !== null) throw new Error("Nested objects not allowed in V2 canonical.");
-    canonical[k] = v;
-  }
-  return new TextEncoder().encode(JSON.stringify(canonical));
 }

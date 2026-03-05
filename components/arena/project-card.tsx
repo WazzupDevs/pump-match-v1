@@ -68,7 +68,7 @@ type RiskBandConfig = { color: string; icon: ReactNode; label: string };
 
 function RiskBandBadge({ band, score }: { band: string, score: number }) {
   const configs: Record<string, RiskBandConfig> = {
-    SAFE: { color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-[0_0_10px_-2px_rgba(16,185,129,0.3)]", icon: <ShieldCheck className="h-3 w-3" />, label: "SAFE" },
+    SAFE: { color: "bg-emerald-500/15 text-emerald-300 border-emerald-400/50 shadow-[0_0_18px_-2px_rgba(16,185,129,0.45)] animate-pulse", icon: <ShieldCheck className="h-3 w-3" />, label: "SAFE" },
     LOW_RISK: { color: "bg-blue-500/10 text-blue-400 border-blue-500/30", icon: <Shield className="h-3 w-3" />, label: "LOW RISK" },
     MEDIUM: { color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30", icon: <AlertTriangle className="h-3 w-3" />, label: "MEDIUM RISK" },
     HIGH: { color: "bg-orange-500/10 text-orange-400 border-orange-500/30", icon: <AlertTriangle className="h-3 w-3" />, label: "HIGH RISK" },
@@ -331,13 +331,13 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
               
               <button
                 onClick={handleOpenManageModal}
-                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg font-semibold transition-colors ${
-                  isUserFounder 
-                    ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/30"
-                    : "bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg font-semibold transition-all duration-200 ${
+                  isUserFounder
+                    ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/20 hover:border-indigo-400/60 hover:shadow-[0_0_18px_rgba(99,102,241,0.25)]"
+                    : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/20 hover:border-emerald-400/60 hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]"
                 }`}
               >
-                {isUserFounder ? "Manage Squad" : "View Squad"}
+                {isUserFounder ? "Manage Squad" : "Apply to Squad"}
               </button>
             </div>
           </motion.div>
