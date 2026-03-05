@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, Rocket, AlertTriangle, ShieldCheck } from "lucide-react";
+import type { MouseEvent } from "react";
+import { X, Loader2, Rocket, AlertTriangle, ShieldCheck, AlertCircle } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 import { claimProjectAction } from "@/app/actions/arena";
@@ -9,8 +10,19 @@ import { claimProjectAction } from "@/app/actions/arena";
 interface ClaimProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  walletAddress: string;
+  /** Hint from parent — may lag behind the live adapter. Source-of-truth is publicKey. */
+  walletAddress?: string;
   onSuccess: () => void;
+}
+
+function generateNonce(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback: 16 random bytes → base58
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bs58.encode(bytes);
 }
 
 export function ClaimProjectModal({
@@ -26,8 +38,15 @@ export function ClaimProjectModal({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Cüzdanın imza atabilmesi için hook'u çağırıyoruz
-  const { signMessage } = useWallet();
+  const { publicKey, signMessage } = useWallet();
+  // Live adapter wallet — always use this for signing and payload
+  const adapterWallet = publicKey?.toBase58() ?? null;
+
+  // Warn when prop differs from adapter (stale state in parent)
+  const walletMismatch =
+    adapterWallet &&
+    walletAddress &&
+    adapterWallet !== walletAddress.trim();
 
   // Reset form when modal opens
   useEffect(() => {
@@ -60,7 +79,7 @@ export function ClaimProjectModal({
 
   // Outside click
   const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
+    (e: MouseEvent<HTMLDivElement>) => {
       if (e.target === overlayRef.current) onClose();
     },
     [onClose],
@@ -70,9 +89,22 @@ export function ClaimProjectModal({
     setSubmitError(null);
     setSuccessMsg(null);
 
+    if (!adapterWallet) {
+      setSubmitError("Connect your wallet before claiming a project.");
+      return;
+    }
+
+    if (!signMessage) {
+      setSubmitError(
+        "Your wallet does not support message signing. Please use a supported wallet like Phantom or Solflare.",
+      );
+      return;
+    }
+
     const normalizedName = projectName.trim();
     const normalizedMint = contractAddress.trim();
-    const normalizedWallet = walletAddress.trim();
+    // Always use the live adapter wallet as canonical — never the stale prop
+    const canonicalWallet = adapterWallet;
 
     if (!normalizedName) {
       setSubmitError("Project name is required.");
@@ -82,41 +114,36 @@ export function ClaimProjectModal({
       setSubmitError("Contract address (CA) is required.");
       return;
     }
-    if (!signMessage) {
-      setSubmitError("Your wallet does not support message signing. Please use a supported wallet like Phantom or Solflare.");
-      return;
-    }
 
     setIsSubmitting(true);
-    
+
     try {
-      // 1. PAS-v1 Güvenlik Parametrelerini Üret (Nonce & Timestamp)
-      const nonce = crypto.randomUUID();
+      const nonce = generateNonce();
       const timestamp = Date.now();
 
-      // 2. Deterministik Mesajı İnşa Et (Backend'deki ile harfi harfine aynı olmalı)
-      const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${normalizedWallet}\nTarget: ${normalizedMint}\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
+      // Message must match server's expectedMessage character-for-character
+      const expectedMessage = `Protocol: PumpMatch v1\nAction: claim_project\nWallet: ${canonicalWallet}\nTarget: ${normalizedMint}\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
       const messageBytes = new TextEncoder().encode(expectedMessage);
 
-      // 3. Kullanıcıya İmzalat
       let signatureBase58: string;
       try {
         const signatureBytes = await signMessage(messageBytes);
         signatureBase58 = bs58.encode(signatureBytes);
       } catch {
-        setSubmitError("Signature request was rejected or failed. Proof of Authority is required to claim a project.");
+        setSubmitError(
+          "Signature request was rejected or failed. Proof of Authority is required to claim a project.",
+        );
         setIsSubmitting(false);
         return;
       }
 
-      // 4. İmzayı ve Payload'u Backend'e Fırlat
       const result = await claimProjectAction({
         name: normalizedName,
         mint: normalizedMint,
-        walletAddress: walletAddress, // Orijinal halini yolluyoruz, backend kendi normalize ediyor
-        nonce: nonce,
-        timestamp: timestamp,
-        signature: signatureBase58
+        walletAddress: canonicalWallet,
+        nonce,
+        timestamp,
+        signature: signatureBase58,
       });
 
       if (result.success) {
@@ -130,7 +157,9 @@ export function ClaimProjectModal({
       }
     } catch (error) {
       console.error("[Claim Modal] Unexpected error:", error);
-      setSubmitError("An unexpected error occurred while processing your cryptographic signature.");
+      setSubmitError(
+        "An unexpected error occurred while processing your cryptographic signature.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -164,11 +193,30 @@ export function ClaimProjectModal({
             <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
               Claim Project <ShieldCheck className="h-4 w-4 text-emerald-400" />
             </h2>
-            <p className="text-xs text-slate-500">
-              Zero-Trust Founder Verification
-            </p>
+            <p className="text-xs text-slate-500">Zero-Trust Founder Verification</p>
           </div>
         </div>
+
+        {/* Wallet mismatch warning */}
+        {walletMismatch && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+            <AlertCircle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-300 leading-snug">
+              Active wallet differs from session record. Signing with{" "}
+              <span className="font-mono">{adapterWallet.slice(0, 4)}...{adapterWallet.slice(-4)}</span>.
+            </p>
+          </div>
+        )}
+
+        {/* No wallet connected */}
+        {!adapterWallet && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2.5">
+            <AlertTriangle className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-rose-300 leading-snug">
+              No wallet connected. Please connect your wallet to claim a project.
+            </p>
+          </div>
+        )}
 
         {/* Form */}
         <div className="space-y-4">
@@ -186,7 +234,8 @@ export function ClaimProjectModal({
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               maxLength={60}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+              disabled={isSubmitting}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-colors disabled:opacity-50"
             />
           </div>
           <div>
@@ -202,7 +251,8 @@ export function ClaimProjectModal({
               placeholder="e.g. So11111111111111111111111111111111111111112"
               value={contractAddress}
               onChange={(e) => setContractAddress(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 font-mono text-xs focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+              disabled={isSubmitting}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 font-mono text-xs focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-colors disabled:opacity-50"
             />
           </div>
         </div>
@@ -238,6 +288,7 @@ export function ClaimProjectModal({
             onClick={handleSubmit}
             disabled={
               isSubmitting ||
+              !adapterWallet ||
               !projectName.trim() ||
               !contractAddress.trim() ||
               !!successMsg
