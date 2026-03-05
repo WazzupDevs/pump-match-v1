@@ -134,6 +134,8 @@ export type WalletAnalysis = {
   // Production Grade: Wallet age in days (from first activity, NOT creation date)
   approxWalletAge?: number; // Days since first detected activity
   pumpStats: PumpStats | null;
+  // Helius Wallet Balances API — total USD value of all token holdings (hourly pricing, beta)
+  portfolioValueUsd?: number; // undefined if API unavailable or failed
 };
 
 export type MatchProfile = {
@@ -232,7 +234,7 @@ export type SquadProject = {
   id: string;
   name: string;
   mint_address: string;
-  claimed_by: string;
+  created_by_wallet: string;
   symbol: string;
   status: ArenaProjectStatus;
   claim_tier: ClaimTier;

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { PublicKey } from "@solana/web3.js";  
 import { getAsset, type HeliusAssetInfo } from "@/lib/helius";
-import { getUserProfile, getSquadMemberCounts } from "@/lib/db";
+import { getUserProfile, getSquadMemberCounts, ensureUserAndProfileExists } from "@/lib/db";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
@@ -152,6 +152,7 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
       project_name: payload.name.trim(),
       mint_address: normalizedMint,
       created_by: canonicalWallet,
+      created_by_wallet: canonicalWallet,
       project_symbol: symbol,
       status: "active",
       claim_tier: "founder",
@@ -165,11 +166,50 @@ export async function claimProjectAction(payload: { name: string; mint: string; 
   }).select("id").single();
 
   if (error) {
-    if (error.code === "23505") return { success: true, message: "Welcome back, Founder." };
+    if (error.code === "23505") {
+      // Race condition: another request inserted first — look up the existing row
+      const { data: raceRow } = await supabaseAdmin
+        .from("squad_projects")
+        .select("id")
+        .eq("mint_address", normalizedMint)
+        .maybeSingle();
+      return { success: true, message: "Welcome back, Founder.", projectId: raceRow?.id as string | undefined };
+    }
     return { success: false, errorCode: "DB_ERROR", message: "Failed to claim project." };
   }
 
-  return { success: true, message: `${payload.name} ($${symbol}) has been claimed!`, projectId: data?.id as string | undefined };
+  const projectId = data?.id as string | undefined;
+
+  // ── Insert founder as Leader into squad_members ──────────────
+  // P0 FK: ensure users + profiles exist before squad_members insert
+  if (projectId && userProfile) {
+    const ensured = await ensureUserAndProfileExists(supabaseAdmin, userProfile.id, canonicalWallet);
+    if (!ensured.success) {
+      await supabaseAdmin.from("squad_projects").delete().eq("id", projectId);
+      return { success: false, errorCode: "DB_ERROR", message: ensured.message };
+    }
+    const { error: memberError } = await supabaseAdmin
+      .from("squad_members")
+      .insert({
+        project_id: projectId,
+        user_id: userProfile.id,
+        role: "Leader",
+        status: "active",
+      });
+
+    if (memberError) {
+      // Unique violation means founder was already added (idempotent)
+      if (memberError.code !== "23505") {
+        console.error("[claimProjectAction] squad_members insert error:", memberError);
+        // Rollback: delete the orphaned project
+        await supabaseAdmin.from("squad_projects").delete().eq("id", projectId);
+        return { success: false, errorCode: "DB_ERROR", message: "Failed to register you as squad leader. Please try again." };
+      }
+    }
+  }
+
+  revalidatePath("/command-center");
+  return { success: true, message: `${payload.name} ($${symbol}) has been claimed!`, projectId };
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -191,8 +231,8 @@ export type PowerSquadProject = {
   name: string;
   symbol: string;
   mint_address: string;
-  claimed_by: string;
-  claimed_by_full?: string;
+  created_by_wallet: string;
+  created_by_wallet_full?: string;
   status: string;
   claim_tier: string;
   is_renounced: boolean;
@@ -243,16 +283,24 @@ type FounderStats = {
 
 export async function getPowerSquads(): Promise<PowerSquadProject[]> {
   const supabaseAdmin = getSupabaseAdmin();
+
+  // Only show rankable projects (active + ghost). Rugged projects are excluded.
   const { data, error } = await supabaseAdmin
     .from("squad_projects")
     .select("*")
+    .in("status", ["active", "ghost"])
     .order("last_valid_mc", { ascending: false, nullsFirst: false })
     .limit(20);
 
   if (error || !data) return [];
 
   const projectIds = data.map((row) => row.id as string);
-  const memberCountMap = await getSquadMemberCounts(projectIds);
+
+  // Parallel fetch: member counts + squad member user_ids for trust score aggregation
+  const [memberCountMap, squadTrustMap] = await Promise.all([
+    getSquadMemberCounts(projectIds),
+    getSquadAvgTrustScores(supabaseAdmin, projectIds),
+  ]);
 
   const founders = Array.from(
     new Set(data.map((row) => row.created_by as string).filter(Boolean)),
@@ -301,11 +349,11 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
     return {
       rank: index + 1,
       id: projectId,
-      name: (row.project_name as string) || (row.name as string) || "",
+      name: (row.project_name as string) || "",
       symbol: (row.project_symbol as string) || "",
       mint_address: row.mint_address as string,
-      claimed_by: maskedFounder,
-      claimed_by_full: founderAddr,
+      created_by_wallet: maskedFounder,
+      created_by_wallet_full: founderAddr,
       status: (row.status as string) || "active",
       claim_tier: (row.claim_tier as string) || "community",
       is_renounced: (row.is_renounced as boolean) ?? false,
@@ -317,9 +365,7 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
       last_mc_update: row.last_mc_update as string | null,
       created_at: row.created_at as string,
       memberCount,
-      // squad_avg_trust_score: requires a JOIN with users for member scores.
-      // Set to 0 until a dedicated aggregation query is implemented.
-      squad_avg_trust_score: 0,
+      squad_avg_trust_score: squadTrustMap.get(projectId) ?? 0,
       dev_tier: devStats.tier,
       dev_trust_score: devStats.score,
       dev_status: devStats.status,
@@ -329,6 +375,63 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
         "EXTREME",
     };
   });
+}
+
+/**
+ * Compute average trust score of active squad members per project.
+ * Joins squad_members → users to aggregate real trust scores.
+ */
+async function getSquadAvgTrustScores(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  projectIds: string[],
+): Promise<Map<string, number>> {
+  if (projectIds.length === 0) return new Map();
+
+  // Fetch active squad members with their user_id
+  const { data: members, error } = await supabase
+    .from("squad_members")
+    .select("project_id, user_id")
+    .in("project_id", projectIds)
+    .eq("status", "active");
+
+  if (error || !members || members.length === 0) return new Map();
+
+  // Collect unique user_ids to batch-fetch trust scores
+  const userIds = Array.from(
+    new Set(members.map((m) => m.user_id as string).filter(Boolean)),
+  );
+
+  if (userIds.length === 0) return new Map();
+
+  const { data: usersData } = await supabase
+    .from("users")
+    .select("id, trust_score")
+    .in("id", userIds);
+
+  const trustMap = new Map<string, number>();
+  if (usersData) {
+    for (const u of usersData) {
+      trustMap.set(u.id as string, (u.trust_score as number) ?? 0);
+    }
+  }
+
+  // Aggregate per project
+  const projectScores = new Map<string, { total: number; count: number }>();
+  for (const m of members) {
+    const pid = m.project_id as string;
+    const uid = m.user_id as string;
+    const score = trustMap.get(uid) ?? 0;
+    const entry = projectScores.get(pid) ?? { total: 0, count: 0 };
+    entry.total += score;
+    entry.count += 1;
+    projectScores.set(pid, entry);
+  }
+
+  const result = new Map<string, number>();
+  for (const [pid, { total, count }] of projectScores) {
+    result.set(pid, count > 0 ? Math.round(total / count) : 0);
+  }
+  return result;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -487,15 +590,36 @@ export async function getSquadMembersAction(projectId: string) {
     const supabaseAdmin = getSupabaseAdmin();
     const terminalList = `(${TERMINAL_STATUSES.map((s) => `"${s}"`).join(",")})`;
     const { data, error } = await supabaseAdmin
-      .from('squad_members')
-      .select('*')
-      .eq('project_id', projectId)
-      .not('status', 'in', terminalList);
+      .from("squad_members")
+      .select("id, project_id, role, status, joined_at, left_at, user_id, profiles(wallet_address)")
+      .eq("project_id", projectId)
+      .not("status", "in", terminalList);
 
     if (error) throw error;
-    return { success: true, data };
+
+    const members = (data ?? []).map((row: any) => {
+      const addr = typeof row.profiles?.wallet_address === "string" && row.profiles.wallet_address.length > 0
+        ? row.profiles.wallet_address
+        : "Unknown";
+      const display =
+        addr !== "Unknown" && addr.length > 8
+          ? `${addr.slice(0, 4)}...${addr.slice(-4)}`
+          : addr;
+
+      return {
+        id: row.id as string,
+        projectId: row.project_id as string,
+        walletAddress: addr,
+        displayAddress: display,
+        role: row.role as string | undefined,
+        status: row.status as string,
+        joinedAt: (row.joined_at as string) ?? new Date().toISOString(),
+      };
+    });
+
+    return { success: true, data: members };
   } catch (error) {
     console.error("Error fetching squad members:", error);
-    return { success: false, data: [] };
+    return { success: false, data: [] as any[] };
   }
 }

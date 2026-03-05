@@ -287,12 +287,12 @@ export function ArenaLeaderboard({
                               setSquadModal({
                                 projectId: project.id,
                                 projectName: project.name,
-                                founderWallet: project.claimed_by_full ?? project.claimed_by,
+                                founderWallet: project.created_by_wallet_full ?? project.created_by_wallet,
                               })
                             }
                             className="text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg border border-slate-700/50 bg-slate-900/40 text-slate-500 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all font-medium"
                           >
-                            {project.claimed_by_full === walletAddress ? "Manage Squad" : "View Squad"}
+                            {project.created_by_wallet_full === walletAddress ? "Manage Squad" : "View Squad"}
                           </button>
                         )}
                       </div>
@@ -322,7 +322,7 @@ export function ArenaLeaderboard({
         <SquadMemberModal
           projectId={squadModal.projectId}
           projectName={squadModal.projectName}
-          isFounder={walletAddress.toLowerCase() === squadModal.founderWallet?.toLowerCase()}
+          isFounder={walletAddress === squadModal.founderWallet}
           walletAddress={walletAddress}
           isOpen={!!squadModal}
           onClose={() => setSquadModal(null)}

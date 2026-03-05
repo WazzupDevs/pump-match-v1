@@ -4,6 +4,7 @@ import {
   getAssetsByOwner,
   getSolBalance,
   getWalletTransactionData,
+  getWalletBalances,
   searchAssets,
   type DasAsset,
 } from "@/lib/helius";
@@ -15,8 +16,9 @@ import {
 } from "@/lib/db";
 import { checkRateLimit, RATE_LIMITS, getRedisClient } from "@/lib/rate-limiter";
 // SECURITY: Crypto helpers extracted to lib/signature.ts to avoid duplication
-import { verifyLegacySignature as verifyWalletSignature, validateMessageTimestamp } from "@/lib/signature";
+import { verifyLegacySignature as verifyWalletSignature } from "@/lib/signature";
 import { headers } from "next/headers";
+import { isArchitect } from "@/lib/architect";
 
 import type {
   AnalyzeWalletResult,
@@ -102,6 +104,19 @@ function isValidSolanaAddress(address: string): boolean {
   // Base58 charset: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
   const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
   return base58Regex.test(address);
+}
+
+/**
+ * Universal address normalization: trims, strips "web3:solana:" prefix,
+ * validates base58 format. Returns the clean address or throws.
+ * DO NOT toLowerCase — Solana base58 is case-sensitive.
+ */
+function normalizeAndValidateSolanaAddress(address: string): string {
+  let trimmed = address.trim();
+  if (trimmed.startsWith("web3:solana:")) trimmed = trimmed.slice("web3:solana:".length);
+  const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  if (!base58Regex.test(trimmed)) throw new Error("Invalid Solana address format.");
+  return trimmed;
 }
 
 function computeTokenCount(items: DasAsset[]): number {
@@ -262,18 +277,15 @@ function calculateBadgeScores(badgeIds: BadgeId[]): { systemScore: number; socia
 // Pump Match - Score label calculation removed (no client-side logic)
 
 export async function analyzeWallet(address: string, userIntent?: UserIntent): Promise<AnalyzeWalletResponse> {
-  // Validation: Address required
-  let trimmed = address.trim();
-  // Defense in depth: Supabase Web3 Auth may prefix "web3:solana:" to the address
-  if (trimmed.startsWith("web3:solana:")) trimmed = trimmed.slice("web3:solana:".length);
-  if (!trimmed) {
-    throw new Error("Address is required");
-  }
+  // Universal normalization + validation (strips web3:solana: prefix, validates base58)
+  const trimmed = normalizeAndValidateSolanaAddress(address);
 
-  // Production Grade: Validate Solana address format
-  if (!isValidSolanaAddress(trimmed)) {
-    console.error("[analyzeWallet] Validation failed for address:", JSON.stringify(trimmed), "typeof:", typeof address, "length:", trimmed.length);
-    throw new Error(`Invalid Solana address. Please enter a valid base58 wallet address. (received: ${trimmed.slice(0, 12)}…, type: ${typeof address}, len: ${trimmed.length})`);
+  // SECURITY: IP-based rate limit — protects Helius API from distributed abuse
+  const headersList = await headers();
+  const ip = headersList.get("x-forwarded-for")?.split(",")[0]?.trim() ?? headersList.get("x-real-ip") ?? "unknown";
+  const ipRateCheck = await checkRateLimit(`analyze_ip:${ip}`, RATE_LIMITS.ANALYZE_WALLET.maxRequests * 2, RATE_LIMITS.ANALYZE_WALLET.windowMs);
+  if (!ipRateCheck.allowed) {
+    throw new Error("IP Rate limit exceeded. Please wait before analyzing again.");
   }
 
   // SECURITY (VULN-04): Cache key is address-only — NOT intent-dependent.
@@ -303,10 +315,13 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
 
   try {
     // Parallel data fetching (Enhanced Transactions API eliminates N+1 pattern)
-    const [assetsByOwnerResult, solBalance, txData] = await Promise.all([
+    // getWalletBalances is belt-and-suspenders wrapped: returns null internally on any
+    // error AND has .catch(() => null) so a future refactor can't break the pipeline.
+    const [assetsByOwnerResult, solBalance, txData, balancesData] = await Promise.all([
       getAssetsByOwner(trimmed),
       getSolBalance(trimmed),
       getWalletTransactionData(trimmed), // Unified: count + wallet age + funding source
+      getWalletBalances(trimmed).catch(() => null), // Non-critical: portfolio USD value
     ]);
 
     const transactionCount = txData.transactionCount;
@@ -401,7 +416,9 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     // allowing an attacker to spam thousands of random wallets into Supabase.
     // Now: guest wallets are analyzed in memory only, DB is not touched.
     // ──────────────────────────────────────────────────────────────
-    if (isRegistered) {
+    // ── Architect Mode: skip DB write to avoid persisting fake scores ──
+    const architectActive = isArchitect(trimmed);
+    if (isRegistered && !architectActive) {
       try {
         const calculatedLevel = badges.includes("whale") ? "Whale" :
                                 badges.includes("dev") ? "Dev" :
@@ -417,25 +434,54 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     }
     // ──────────────────────────────────────────────────────────────
 
+    // ── Architect Mode: in-memory overrides (never persisted to DB) ──
+    let finalTrustScore = trustScore;
+    let finalScore = score;
+    let finalScoreLabel = scoreLabel;
+    let finalScoreBreakdown = scoreBreakdown;
+    let finalBadges: BadgeId[] = badges;
+    let finalSystemScore = systemScore;
+    let finalSocialScore = socialScore;
+
+    if (architectActive) {
+      console.log(`[analyzeWallet] ARCHITECT MODE active for ${trimmed.slice(0, 8)}...`);
+      finalTrustScore = 99;
+      finalScore = 99;
+      finalScoreLabel = "CHAD";
+      finalScoreBreakdown = {
+        balanceScore: 40,
+        activityScore: 40,
+        diversityScore: 20,
+        penalty: 0,
+        total: 99,
+        explanation: "Architect Mode · All scores maxed",
+      };
+      finalBadges = ["whale", "dev", "og_wallet", "diamond_hands", "community_trusted"];
+      const archBadgeScores = calculateBadgeScores(finalBadges);
+      finalSystemScore = archBadgeScores.systemScore;
+      finalSocialScore = archBadgeScores.socialScore;
+    }
+
     const walletAnalysis: WalletAnalysis = {
       address: trimmed,
       solBalance,
       tokenCount: fungibleTokens,
       nftCount: totalNfts,
       assetCount: totalAssets,
-      score,
-      scoreLabel,
-      trustScore,
-      badges,
+      score: finalScore,
+      scoreLabel: finalScoreLabel,
+      trustScore: finalTrustScore,
+      badges: finalBadges,
       transactionCount,
       tokenDiversity,
-      scoreBreakdown,
-      systemScore,
-      socialScore,
+      scoreBreakdown: finalScoreBreakdown,
+      systemScore: finalSystemScore,
+      socialScore: finalSocialScore,
       intent: userIntent,
       isRegistered,
       approxWalletAge: firstTxData.approxWalletAgeDays ?? undefined,
       pumpStats,
+      portfolioValueUsd: balancesData?.totalUsdValue,
     };
 
     // Match Engine: Calculate matches (read-only, mock data for preview)
@@ -476,8 +522,11 @@ export async function joinNetwork(
   "use server";
 
   try {
+    // Universal normalization + validation
+    const normalizedAddress = normalizeAndValidateSolanaAddress(address);
+
     // SECURITY (VULN-11): Rate limit joinNetwork by wallet address
-    const rateCheck = await checkRateLimit(address.trim(), RATE_LIMITS.JOIN_NETWORK.maxRequests, RATE_LIMITS.JOIN_NETWORK.windowMs);
+    const rateCheck = await checkRateLimit(normalizedAddress, RATE_LIMITS.JOIN_NETWORK.maxRequests, RATE_LIMITS.JOIN_NETWORK.windowMs);
     if (!rateCheck.allowed) {
       return { success: false, message: "Too many join attempts. Please wait before trying again." };
     }
@@ -500,11 +549,29 @@ export async function joinNetwork(
     if (!signedMessage) {
       return { success: false, message: "Wallet signature is required. Please reconnect your wallet and try again." };
     }
-    if (!validateMessageTimestamp(signedMessage.message)) {
+
+    // SECURITY: Canonical message parsing — anti-phishing & replay protection
+    const m = signedMessage.message.match(/^Pump Match (Join|Update|Leave)\r?\nWallet:\s([1-9A-HJ-NP-Za-km-z]{32,44})\r?\nTimestamp:\s(\d{13})$/);
+    if (!m) {
+      return { success: false, message: "Malformed signature message format." };
+    }
+    const [, actionType, msgWallet, tsStr] = m;
+    if (actionType !== "Join") {
+      return { success: false, message: "Signature action mismatch. Expected 'Join'." };
+    }
+    if (msgWallet !== normalizedAddress) {
+      return { success: false, message: "Message wallet does not match target wallet." };
+    }
+    const parsedTs = Number(tsStr);
+    const now = Date.now();
+    const TIME_WINDOW_MS = 5 * 60 * 1000;
+    const FUTURE_SKEW_MS = 30 * 1000;
+    if (!Number.isFinite(parsedTs) || parsedTs > now + FUTURE_SKEW_MS || now - parsedTs > TIME_WINDOW_MS) {
       return { success: false, message: "Signature expired. Please sign again." };
     }
+
     const isValidSig = await verifyWalletSignature(
-      address.trim(),
+      normalizedAddress,
       signedMessage.message,
       signedMessage.signature,
     );
@@ -532,7 +599,7 @@ export async function joinNetwork(
     }
 
     // Security & Stability - Check if user already exists to preserve joinedAt
-    const existingUser = await getUserProfile(address.trim());
+    const existingUser = await getUserProfile(normalizedAddress);
     const isFirstJoin = !existingUser;
     const joinedAt = existingUser?.joinedAt ?? Date.now(); // Immutable Join Date
 
@@ -551,12 +618,12 @@ export async function joinNetwork(
         // GHOST MODE (sleeping > 7 days): Hard Rejoin
         // Treat as if new registration - update lastActiveAt, refresh profile
         // eslint-disable-next-line no-console
-        console.log(`[joinNetwork] Ghost user ${address.slice(0, 8)}... performing Hard Rejoin (inactive ${Math.round(timeSinceLastActive / 86400000)}d)`);
+        console.log(`[joinNetwork] Ghost user ${normalizedAddress.slice(0, 8)}... performing Hard Rejoin (inactive ${Math.round(timeSinceLastActive / 86400000)}d)`);
         // Fall through to full profile rebuild below
       } else if (isRecentlyActive) {
         // ACTIVE user (< 1 hour): Soft Cooldown - noop
         // eslint-disable-next-line no-console
-        console.log(`[joinNetwork] Active user ${address.slice(0, 8)}... Soft Cooldown (last active ${Math.round(timeSinceLastActive / 1000)}s ago)`);
+        console.log(`[joinNetwork] Active user ${normalizedAddress.slice(0, 8)}... Soft Cooldown (last active ${Math.round(timeSinceLastActive / 1000)}s ago)`);
         return {
           success: true,
           message: "You are already an active member. Profile unchanged.",
@@ -569,8 +636,8 @@ export async function joinNetwork(
     // NOT: Supabase upsertUser fonksiyonu Partial<UserData> kabul eder.
     // Burada tam profil oluşturuyoruz ancak veritabanına sadece schema'ya uygun alanlar gidecek.
     const userProfile: UserProfile = {
-      id: existingUser?.id ?? `user_${address.slice(0, 8)}`,
-      address: address.trim(),
+      id: existingUser?.id ?? `user_${normalizedAddress.slice(0, 8)}`,
+      address: normalizedAddress,
       username: sanitizedUsername,
       role: walletAnalysis.badges.includes("whale")
         ? "Whale"
@@ -617,7 +684,7 @@ export async function joinNetwork(
         : userProfile.identityState;
 
     // GÜNCELLEME: Veritabanına yaz (Supabase) — tüm profil alanları
-    const success = await upsertUser(address.trim(), {
+    const success = await upsertUser(normalizedAddress, {
         trust_score: userProfile.trustScore,
         level: userProfile.role,
         username: userProfile.username,
@@ -647,7 +714,7 @@ export async function joinNetwork(
     }
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error(`[joinNetwork] Exception for ${address}:`, error);
+    console.error(`[joinNetwork] Exception for ${address.slice(0, 12)}:`, error);
     return {
       success: false,
       message: `Failed to join network: ${error instanceof Error ? error.message : String(error)}`,
@@ -880,11 +947,28 @@ export async function updateProfileAction(
   "use server";
 
   try {
-    const trimmed = address.trim();
+    const trimmed = normalizeAndValidateSolanaAddress(address);
 
-    if (!validateMessageTimestamp(signedMessage.message)) {
+    // SECURITY: Canonical message parsing — anti-phishing & replay protection
+    const m = signedMessage.message.match(/^Pump Match (Join|Update|Leave)\r?\nWallet:\s([1-9A-HJ-NP-Za-km-z]{32,44})\r?\nTimestamp:\s(\d{13})$/);
+    if (!m) {
+      return { success: false, message: "Malformed signature message format." };
+    }
+    const [, actionType, msgWallet, tsStr] = m;
+    if (actionType !== "Update") {
+      return { success: false, message: "Signature action mismatch. Expected 'Update'." };
+    }
+    if (msgWallet !== trimmed) {
+      return { success: false, message: "Message wallet does not match target wallet." };
+    }
+    const parsedTs = Number(tsStr);
+    const now = Date.now();
+    const TIME_WINDOW_MS = 5 * 60 * 1000;
+    const FUTURE_SKEW_MS = 30 * 1000;
+    if (!Number.isFinite(parsedTs) || parsedTs > now + FUTURE_SKEW_MS || now - parsedTs > TIME_WINDOW_MS) {
       return { success: false, message: "Signature expired. Please try again." };
     }
+
     const isValidSig = await verifyWalletSignature(trimmed, signedMessage.message, signedMessage.signature);
     if (!isValidSig) {
       return { success: false, message: "Signature verification failed." };
@@ -990,10 +1074,8 @@ export async function endorseUserAction(
   "use server";
 
   try {
-    const fromParam = fromWallet.trim();
-    const toParam = toWallet.trim();
-
-    if (!fromParam || !toParam) return { success: false, message: "Invalid wallet address." };
+    const fromParam = normalizeAndValidateSolanaAddress(fromWallet);
+    const toParam = normalizeAndValidateSolanaAddress(toWallet);
     if (fromParam === toParam) return { success: false, message: "You cannot endorse yourself." };
 
     const m = signedMessage.message.match(
@@ -1081,10 +1163,11 @@ export async function getUserAction(address: string): Promise<UserProfile | null
   "use server";
 
   try {
-    return await getUserProfile(address.trim());
+    const normalizedAddr = normalizeAndValidateSolanaAddress(address);
+    return await getUserProfile(normalizedAddr);
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error(`[getUserAction] Exception for ${address}:`, error);
+    console.error(`[getUserAction] Exception for ${address.slice(0, 12)}:`, error);
     return null;
   }
 }
@@ -1103,11 +1186,28 @@ export async function leaveNetworkAction(
   "use server";
 
   try {
-    const trimmed = address.trim();
+    const trimmed = normalizeAndValidateSolanaAddress(address);
 
-    if (!validateMessageTimestamp(signedMessage.message)) {
+    // SECURITY: Canonical message parsing — anti-phishing & replay protection
+    const m = signedMessage.message.match(/^Pump Match (Join|Update|Leave)\r?\nWallet:\s([1-9A-HJ-NP-Za-km-z]{32,44})\r?\nTimestamp:\s(\d{13})$/);
+    if (!m) {
+      return { success: false, message: "Malformed signature message format." };
+    }
+    const [, actionType, msgWallet, tsStr] = m;
+    if (actionType !== "Leave") {
+      return { success: false, message: "Signature action mismatch. Expected 'Leave'." };
+    }
+    if (msgWallet !== trimmed) {
+      return { success: false, message: "Message wallet does not match target wallet." };
+    }
+    const parsedTs = Number(tsStr);
+    const now = Date.now();
+    const TIME_WINDOW_MS = 5 * 60 * 1000;
+    const FUTURE_SKEW_MS = 30 * 1000;
+    if (!Number.isFinite(parsedTs) || parsedTs > now + FUTURE_SKEW_MS || now - parsedTs > TIME_WINDOW_MS) {
       return { success: false, message: "Signature expired. Please try again." };
     }
+
     const isValidSig = await verifyWalletSignature(trimmed, signedMessage.message, signedMessage.signature);
     if (!isValidSig) {
       return { success: false, message: "Signature verification failed." };
@@ -1126,7 +1226,7 @@ export async function leaveNetworkAction(
     return { success: true, message: "You have left the network. Your data has been anonymized." };
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error(`[leaveNetworkAction] Exception for ${address}:`, error);
+    console.error(`[leaveNetworkAction] Exception for ${address.slice(0, 12)}:`, error);
     return { success: false, message: "Opt-out failed. Please try again." };
   }
 }

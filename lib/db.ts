@@ -1,4 +1,5 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters, Role, Badge, SocialProof, IdentityState, UserIntent, SocialLinks } from '@/types';
 
@@ -134,6 +135,62 @@ export async function upsertUser(wallet: string, partialData: UpsertUserData) {
     return null;
   }
   return data;
+}
+
+/**
+ * P0 FK guarantee: before inserting into squad_members, ensure both
+ * public.users and public.profiles rows exist for the given userId.
+ * - If users.id=userId is missing: insert users { id, wallet_address, is_opted_in: true }.
+ *   If wallet_address already exists with a different id, returns mapping mismatch.
+ * - Upserts profiles { id, wallet_address } onConflict id.
+ * Call this before any squad_members insert that uses user_id.
+ */
+export async function ensureUserAndProfileExists(
+  supabaseAdmin: SupabaseClient,
+  userId: string,
+  walletAddress: string,
+): Promise<{ success: true } | { success: false; message: string }> {
+  console.log("[ensureUserAndProfileExists] DIAG userId:", userId, "walletAddress:", walletAddress);
+  const { data: existingUser } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!existingUser) {
+    const { data: existingByWallet } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("wallet_address", walletAddress)
+      .maybeSingle();
+
+    if (existingByWallet && existingByWallet.id !== userId) {
+      return { success: false, message: "Wallet mapping mismatch. Please rejoin network." };
+    }
+
+    const { error: insertUserError } = await supabaseAdmin.from("users").insert({
+      id: userId,
+      wallet_address: walletAddress,
+      is_opted_in: true,
+    });
+
+    if (insertUserError) {
+      if (insertUserError.code === "23505") {
+        return { success: false, message: "Wallet mapping mismatch. Please rejoin network." };
+      }
+      return { success: false, message: "Failed to ensure user record. Please try again." };
+    }
+  }
+
+  const { error: upsertProfileError } = await supabaseAdmin
+    .from("profiles")
+    .upsert({ id: userId, wallet_address: walletAddress }, { onConflict: "id" });
+
+  if (upsertProfileError) {
+    return { success: false, message: "Failed to ensure profile record. Please try again." };
+  }
+
+  return { success: true };
 }
 
 // ── 2. MATCH ENGINE İHTİYAÇLARI ──

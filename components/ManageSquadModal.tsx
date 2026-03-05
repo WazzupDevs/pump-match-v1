@@ -27,7 +27,7 @@ interface ManageSquadModalProps {
   project: {
     id: string;
     name: string;
-    claimed_by: string;
+    created_by_wallet: string;
   };
   currentUserWallet?: string | null;
   members: SquadMember[];
@@ -69,11 +69,11 @@ export default function ManageSquadModal({
   if (!isOpen) return null;
 
   // Kurucu kontrolü
-  const isFounder = currentUserWallet?.toLowerCase() === project.claimed_by?.toLowerCase();
-  
+  const isFounder = currentUserWallet === project.created_by_wallet;
+
   // Rol tespiti
-  const myMembership = currentUserWallet 
-    ? members.find(m => m.wallet_address.toLowerCase() === currentUserWallet.toLowerCase())
+  const myMembership = currentUserWallet
+    ? members.find(m => m.wallet_address === currentUserWallet)
     : null;
   const myRole = isFounder ? "Founder" : (myMembership ? myMembership.role : "Guest");
 

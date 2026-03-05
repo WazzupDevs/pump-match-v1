@@ -438,7 +438,7 @@ DECLARE
 BEGIN
     -- 1. DEADLOCK PREVENTION: Strict Locking Order (Project -> Member)
     -- Lock the project to ensure no parallel actions mutate squad state concurrently.
-    SELECT lower(claimed_by) INTO v_founder_wallet 
+    SELECT lower(created_by_wallet) INTO v_founder_wallet 
     FROM public.squad_projects 
     WHERE id = p_project_id 
     FOR UPDATE;
@@ -594,7 +594,7 @@ DECLARE
     v_left_at TIMESTAMPTZ;
 BEGIN
     -- DEADLOCK ÖNLEME & PROJE KİLİDİ
-    SELECT lower(claimed_by) INTO v_founder_wallet FROM public.squad_projects WHERE id = p_project_id FOR UPDATE;
+    SELECT lower(created_by_wallet) INTO v_founder_wallet FROM public.squad_projects WHERE id = p_project_id FOR UPDATE;
     IF NOT FOUND OR v_founder_wallet IS NULL THEN RETURN jsonb_build_object('success', false, 'message', 'Project locked or not found.'); END IF;
 
     -- GERÇEK İDEMPOTENT KONTROL
@@ -739,7 +739,7 @@ DECLARE
   v_founder_status TEXT;
 BEGIN
   -- 1. Kurucuyu (Founder) ve Puanını Bul
-  SELECT claimed_by INTO v_founder_id 
+  SELECT created_by_wallet INTO v_founder_id 
   FROM squad_projects 
   WHERE id = p_project_id;
 
@@ -858,7 +858,7 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  FOR v_proj IN SELECT id FROM squad_projects WHERE claimed_by = NEW.user_id LOOP
+  FOR v_proj IN SELECT id FROM squad_projects WHERE created_by_wallet = NEW.user_id LOOP
     PERFORM recalculate_project_trust(v_proj.id);
   END LOOP;
 

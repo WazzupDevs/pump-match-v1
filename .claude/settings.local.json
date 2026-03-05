@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsc --noEmit --project tsconfig.json)"
+      "Bash(npx tsc --noEmit --project tsconfig.json)",
+      "Bash(npx tsc --noEmit)",
+      "WebFetch(domain:www.helius.dev)",
+      "Bash(ls c:/Projelerim/PUMPMATCH/pump-match/lib/*.ts)"
     ]
   }
 }

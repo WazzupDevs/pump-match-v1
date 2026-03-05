@@ -1,7 +1,6 @@
 import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-const supabase = getSupabaseAdmin();
 import type { ArenaProjectStatus, DexScreenerPair } from "@/types";
 
 // ──────────────────────────────────────────────────────────────
@@ -91,10 +90,18 @@ function findBestPair(
   pairs: DexScreenerPair[],
   mintAddress: string,
 ): DexScreenerPair | null {
-  const mintLower = mintAddress.toLowerCase();
-  const matching = pairs.filter(
-    (p) => p.baseToken.address.toLowerCase() === mintLower,
+  // Exact match first (Solana base58 is case-sensitive)
+  let matching = pairs.filter(
+    (p) => p.baseToken.address === mintAddress,
   );
+
+  // Fallback: DexScreener may normalize casing on some chains
+  if (matching.length === 0) {
+    const mintLower = mintAddress.toLowerCase();
+    matching = pairs.filter(
+      (p) => p.baseToken.address.toLowerCase() === mintLower,
+    );
+  }
 
   if (matching.length === 0) return null;
 
@@ -118,6 +125,8 @@ export async function syncArenaMarketCaps(): Promise<{
   skipped: number;
   error?: string;
 }> {
+  const supabase = getSupabaseAdmin();
+
   // ── 1. Atomic Lock ──
   const { data: lockAcquired, error: lockError } = await supabase.rpc(
     "acquire_lock",
@@ -176,7 +185,16 @@ export async function syncArenaMarketCaps(): Promise<{
       };
     }
 
-    const allProjects = projects as ProjectRow[];
+    // Only sync projects with real mints and syncable statuses.
+    // "active" = live token, "ghost" = low liquidity (may resurrect).
+    // "rugged" and placeholder mints are permanently excluded.
+    const PLACEHOLDER_PREFIX = "SQUAD_NO_MINT_";
+    const SYNCABLE_STATUSES: Set<string> = new Set(["active", "ghost"]);
+    const allProjects = (projects as ProjectRow[]).filter(
+      (p) =>
+        !p.mint_address.startsWith(PLACEHOLDER_PREFIX) &&
+        SYNCABLE_STATUSES.has(p.status),
+    );
 
     // ── Frequency Guard: filter stale projects only ──
     const now = Date.now();

@@ -15,7 +15,7 @@ import {
   Shield,
   Trophy,
   Users,
-  TrendingUp,
+  DollarSign,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -27,22 +27,31 @@ import {
   Swords,
   UserPlus,
   ArrowUpRight,
-  ArrowDownRight,
   BadgeCheck,
   AlertCircle,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { analyzeWallet, getNetworkMatches } from "@/app/actions/analyzeWallet";
+import { createSquadAction, inviteAgentAction, respondToInviteAction } from "@/app/actions/squads";
+import type { ActionResult } from "@/app/actions/squads";
 import type { MatchProfile, WalletAnalysis } from "@/types";
 
+/** Get the current Supabase access token for server action calls. */
+async function getAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? "";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Admin / God Mode
-// Replace with your real base58 Solana address.
+// Admin / God Mode + Architect Mode
 // Server-side RLS still enforces all real restrictions; this is UI-only.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ADMIN_WALLET = "CLsyuBeebutGdbxjur6fyb4RuPaQhj7u3vLXPvdMWiTv";
+const ADMIN_WALLET =
+  process.env.NEXT_PUBLIC_ADMIN_WALLET ?? "CLsyuBeebutGdbxjur6fyb4RuPaQhj7u3vLXPvdMWiTv";
+const ARCHITECT_MODE_ENABLED =
+  process.env.NEXT_PUBLIC_ENABLE_ARCHITECT_MODE === "true";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -100,12 +109,19 @@ interface SquadData {
   projectId: string;
   memberCount: number;
   members: Member[];
+  role: string;
+}
+
+interface PendingInvite {
+  projectId: string;
+  projectName: string;
 }
 
 interface DashboardData {
   trust: TrustData | null;
   arena: ArenaData | null;
   squad: SquadData | null; // null = not in an active squad
+  pendingInvites: PendingInvite[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,11 +175,20 @@ interface StatItem {
   bg: string;
 }
 
+// Compact USD formatting: $1.2M for millions, $45,300 for smaller values
+function formatUsd(value: number): string {
+  if (Math.abs(value) >= 1_000_000) {
+    return `$${new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value)}`;
+  }
+  return `$${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)}`;
+}
+
 function buildStats(
   score: number | null,
   rank: number | null,
   isLoading: boolean,
   solBalance?: number | null,
+  portfolioValueUsd?: number,
 ): StatItem[] {
   const pending = isLoading ? "…" : "—";
   return [
@@ -189,11 +214,11 @@ function buildStats(
       bg: "bg-amber-500/10",
     },
     {
-      label: "Win Rate",
-      value: "—",           // reserved for wallet analysis (future)
-      icon: TrendingUp,
-      color: "text-violet-400",
-      bg: "bg-violet-500/10",
+      label: "Portfolio Value",
+      value: portfolioValueUsd !== undefined ? formatUsd(portfolioValueUsd) : pending,
+      icon: DollarSign,
+      color: "text-rose-400",
+      bg: "bg-rose-500/10",
     },
   ];
 }
@@ -380,19 +405,6 @@ function IdentityCard({
 // MOCK_TOKENS kept intact — real data wired via useEffect in CommandCenterInner
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MOCK_TOKENS = [
-  { symbol: "BONK",   change: +41.2, value: "$420", positive: true  },
-  { symbol: "WIF",    change:  -8.4, value: "$210", positive: false },
-  { symbol: "POPCAT", change: +22.1, value: "$315", positive: true  },
-  { symbol: "FWOG",   change:  -3.1, value: "$88",  positive: false },
-];
-
-const MOCK_METRICS = [
-  { label: "Token Diversity",  value: "14 assets"  },
-  { label: "Closed Positions", value: "87 trades"  },
-  { label: "Avg Hold Time",    value: "6.4 hours"  },
-  { label: "Rug Magnet",       value: "Low risk"   },
-];
 
 function WalletAnalysisCard({
   analysisData,
@@ -420,7 +432,7 @@ function WalletAnalysisCard({
         { label: "Avg Hold Time", value: analysisData.pumpStats ? formatHoldTime(analysisData.pumpStats.medianHoldTimeSeconds) : "—" },
         { label: "Rug Magnet", value: analysisData.pumpStats ? rugRiskLabel(analysisData.pumpStats.rugMagnetScore) : "—" },
       ]
-    : MOCK_METRICS;
+    : null;
 
   return (
     <div className="relative overflow-hidden p-6 bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl hover:border-cyan-500/25 transition-all duration-300">
@@ -436,72 +448,79 @@ function WalletAnalysisCard({
           </h2>
         </div>
         <span className="text-[10px] text-slate-600 bg-slate-800/60 border border-slate-700/40 px-2.5 py-1 rounded-full">
-          {hasData ? (matchCount > 0 ? `${matchCount} Matches · Live` : "Live") : "Mock Preview"}
+          {hasData ? (matchCount > 0 ? `${matchCount} Matches · Live` : "Live") : "Not Analyzed"}
         </span>
       </div>
 
-      {/* PnL Hero */}
+      {/* Balance & Score Hero */}
       <div className="mb-5 p-4 bg-slate-800/50 rounded-xl border border-slate-700/30">
-        <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
-          {hasData ? "SOL Balance" : "Estimated PnL (30d)"}
-        </p>
-        <div className="flex items-baseline gap-2">
-          <span className="text-3xl font-black text-emerald-400">
-            {hasData ? `${analysisData.solBalance.toFixed(2)} SOL` : "+$1,337"}
-          </span>
-          <div className="flex items-center gap-0.5 text-emerald-500 text-xs font-semibold">
-            {hasData ? <Shield className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
-            {hasData ? `Score: ${analysisData.trustScore}/100` : "18.4%"}
+        {hasData ? (
+          <>
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+              SOL Balance
+            </p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-emerald-400">
+                {analysisData.solBalance.toFixed(2)} SOL
+              </span>
+              <div className="flex items-center gap-0.5 text-emerald-500 text-xs font-semibold">
+                <Shield className="h-3.5 w-3.5" />
+                Score: {analysisData.trustScore}/100
+              </div>
+            </div>
+            {analysisData.scoreLabel && (
+              <p className="mt-1 text-[10px] text-slate-500 uppercase tracking-wider">
+                {analysisData.scoreLabel}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+              Wallet Overview
+            </p>
+            <p className="text-sm text-slate-500">
+              Run analysis to see your balance and trust score.
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* Quick metrics grid — only shown after analysis */}
+      {metrics && (
+        <div className="grid grid-cols-2 gap-2 mb-5">
+          {metrics.map((m) => (
+            <div
+              key={m.label}
+              className="p-3 bg-slate-800/30 rounded-xl border border-slate-700/20"
+            >
+              <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
+                {m.label}
+              </p>
+              <p className="text-xs font-semibold text-slate-300">{m.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Badges — only shown if analysis returned badges */}
+      {hasData && analysisData.badges.length > 0 && (
+        <div className="mb-5">
+          <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-2">
+            Active Badges
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {analysisData.badges.map((badge) => (
+              <span
+                key={badge}
+                className="text-[10px] font-semibold text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full"
+              >
+                {badge.replace(/_/g, " ")}
+              </span>
+            ))}
           </div>
         </div>
-      </div>
-
-      {/* Quick metrics grid */}
-      <div className="grid grid-cols-2 gap-2 mb-5">
-        {metrics.map((m) => (
-          <div
-            key={m.label}
-            className="p-3 bg-slate-800/30 rounded-xl border border-slate-700/20"
-          >
-            <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
-              {m.label}
-            </p>
-            <p className="text-xs font-semibold text-slate-300">{m.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Token positions */}
-      <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-2">
-        Top Positions
-      </p>
-      <div className="space-y-1.5 mb-5">
-        {MOCK_TOKENS.map((t) => (
-          <div
-            key={t.symbol}
-            className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/30 border border-slate-700/20"
-          >
-            <span className="text-xs font-mono font-semibold text-slate-300">
-              {t.symbol}
-            </span>
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] text-slate-500">{t.value}</span>
-              <span
-                className={`text-[11px] font-bold flex items-center gap-0.5 ${
-                  t.positive ? "text-emerald-400" : "text-red-400"
-                }`}
-              >
-                {t.positive ? (
-                  <ArrowUpRight className="h-3 w-3" />
-                ) : (
-                  <ArrowDownRight className="h-3 w-3" />
-                )}
-                {Math.abs(t.change)}%
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
+      )}
 
       {analysisError && (
         <p className="text-xs text-red-400 mb-2">{analysisError}</p>
@@ -659,6 +678,11 @@ function SquadsCard({
   agentCandidates,
   matchesLoading,
   matchesError,
+  walletAddress,
+  userId,
+  onSquadCreated,
+  pendingInvites,
+  onInviteResponded,
 }: {
   squad: SquadData | null;
   isGodMode: boolean;
@@ -666,13 +690,106 @@ function SquadsCard({
   agentCandidates: MatchProfile[];
   matchesLoading: boolean;
   matchesError: string | null;
+  walletAddress: string | null;
+  userId: string | null;
+  onSquadCreated: () => void;
+  pendingInvites: PendingInvite[];
+  onInviteResponded: () => void;
 }) {
   const [radarExpanded, setRadarExpanded] = useState(false);
+  const [isCreatingSquad, setIsCreatingSquad] = useState(false);
+  const [squadName, setSquadName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  // Invite states (Leader Agent Radar)
+  const [invitingSet, setInvitingSet] = useState<Set<string>>(new Set());
+  const [invitedSet, setInvitedSet] = useState<Set<string>>(new Set());
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  // Pending invite response states
+  const [respondingTo, setRespondingTo] = useState<string | null>(null);
+  const [respondError, setRespondError] = useState<string | null>(null);
   const inSquad = squad !== null;
+  const isLeader = squad?.role === "Leader";
   const memberCount = squad?.memberCount ?? 0;
   const maxMembers = 5;
   const emptySlots = Math.max(0, maxMembers - memberCount);
   const capacityPct = Math.round((memberCount / maxMembers) * 100);
+
+  const handleCreateSquad = useCallback(async () => {
+    if (!walletAddress) {
+      setCreateError("Wallet address not available. Please reconnect.");
+      return;
+    }
+    if (!userId) {
+      setCreateError("Not authenticated. Please reconnect your wallet.");
+      return;
+    }
+    const trimmed = squadName.trim();
+    if (trimmed.length < 3) {
+      setCreateError("Squad name must be at least 3 characters.");
+      return;
+    }
+    setIsSubmitting(true);
+    setCreateError(null);
+    try {
+      const token = await getAccessToken();
+      const result = await createSquadAction(trimmed, token);
+      if (result.success) {
+        setIsCreatingSquad(false);
+        setSquadName("");
+        setCreateError(null);
+        onSquadCreated();
+      } else {
+        setCreateError(result.message);
+      }
+    } catch {
+      setCreateError("Failed to create squad. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [squadName, walletAddress, userId, onSquadCreated]);
+
+  const handleInvite = useCallback(async (agentAddr: string) => {
+    if (!squad?.projectId || !agentAddr) return;
+    setInviteError(null);
+    setInvitingSet((prev) => new Set(prev).add(agentAddr));
+    try {
+      const token = await getAccessToken();
+      const result: ActionResult = await inviteAgentAction(squad.projectId, agentAddr, token);
+      if (result.success) {
+        setInvitedSet((prev) => new Set(prev).add(agentAddr));
+        onSquadCreated(); // triggers dashboard re-fetch
+      } else {
+        setInviteError(result.message);
+      }
+    } catch {
+      setInviteError("Failed to send invite.");
+    } finally {
+      setInvitingSet((prev) => {
+        const next = new Set(prev);
+        next.delete(agentAddr);
+        return next;
+      });
+    }
+  }, [squad?.projectId, onSquadCreated]);
+
+  const handleRespondToInvite = useCallback(async (projId: string, accept: boolean) => {
+    setRespondingTo(projId);
+    setRespondError(null);
+    try {
+      const token = await getAccessToken();
+      const result: ActionResult = await respondToInviteAction(projId, accept, token);
+      if (result.success) {
+        onInviteResponded();
+      } else {
+        setRespondError(result.message);
+      }
+    } catch {
+      setRespondError("Failed to respond to invite.");
+    } finally {
+      setRespondingTo(null);
+    }
+  }, [onInviteResponded]);
 
   return (
     <div className="relative overflow-hidden p-6 bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl hover:border-violet-500/25 transition-all duration-300">
@@ -776,6 +893,95 @@ function SquadsCard({
             ))}
           </div>
 
+          {/* Agent Radar: visible for Leaders with empty slots */}
+          {isLeader && emptySlots > 0 && (
+            <div className="mb-5">
+              {inviteError && (
+                <p className="text-xs text-red-400 mb-2">{inviteError}</p>
+              )}
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest">
+                  Recruit Agents
+                </span>
+                <span className="text-[10px] text-slate-600 bg-slate-800/60 border border-slate-700/40 px-2 py-0.5 rounded-full">
+                  {matchesLoading
+                    ? "Scanning…"
+                    : agentCandidates.length > 0
+                      ? `${agentCandidates.length} candidates`
+                      : "Run analysis"}
+                </span>
+              </div>
+              {agentCandidates.length === 0 && !matchesLoading && (
+                <p className="text-xs text-slate-600 py-2">
+                  Run Wallet Analysis to find recruitable agents.
+                </p>
+              )}
+              {agentCandidates.length > 0 && (
+                <>
+                  <div className="space-y-1.5 mb-2">
+                    {(radarExpanded
+                      ? agentCandidates.slice(0, 12)
+                      : agentCandidates.slice(0, 3)
+                    ).map((agent) => {
+                      const agentAddr = agent.address ?? agent.id;
+                      const displayName =
+                        agent.username && agent.username !== "Anon"
+                          ? `@${agent.username}`
+                          : shortAddress(agentAddr ?? null);
+                      const confidence =
+                        typeof agent.matchConfidence === "number"
+                          ? `${Math.round(agent.matchConfidence)}%`
+                          : "Score —";
+                      return (
+                        <div
+                          key={agent.id}
+                          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800/30 border border-slate-700/20 text-xs"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <span className="font-semibold text-slate-300 truncate">
+                              {displayName}
+                            </span>
+                            <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                              {agent.matchReason || "—"}
+                            </p>
+                          </div>
+                          <span className="text-[10px] font-mono text-violet-400 shrink-0">
+                            {confidence}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={invitingSet.has(agentAddr ?? "") || invitedSet.has(agentAddr ?? "")}
+                            className={
+                              invitedSet.has(agentAddr ?? "")
+                                ? "shrink-0 bg-slate-800 text-slate-500 border border-white/10 rounded-lg px-2.5 py-1 text-[10px] font-bold uppercase cursor-default"
+                                : "shrink-0 bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 rounded-lg px-2.5 py-1 text-[10px] font-bold uppercase transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            }
+                            onClick={() => agentAddr && void handleInvite(agentAddr)}
+                          >
+                            {invitedSet.has(agentAddr ?? "")
+                              ? "Invited"
+                              : invitingSet.has(agentAddr ?? "")
+                                ? "Sending…"
+                                : "Invite"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {agentCandidates.length > 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setRadarExpanded((e) => !e)}
+                      className="text-[10px] font-medium text-violet-400 hover:text-violet-300 transition-colors"
+                    >
+                      {radarExpanded ? "Show less" : "View all"}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2">
             <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-violet-500/30 bg-violet-500/5 text-violet-400 text-xs font-bold hover:bg-violet-500/10 hover:border-violet-500/50 transition-all group">
               <ExternalLink className="h-3.5 w-3.5" />
@@ -795,6 +1001,42 @@ function SquadsCard({
       {/* ── Not in a squad ── */}
       {!isLoading && !inSquad && (
         <>
+          {/* ── Pending invites banner ── */}
+          {pendingInvites.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {respondError && (
+                <p className="text-xs text-red-400">{respondError}</p>
+              )}
+              {pendingInvites.map((inv) => (
+                <div
+                  key={inv.projectId}
+                  className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between gap-2"
+                >
+                  <p className="text-xs text-slate-300 font-medium min-w-0 truncate">
+                    You have been invited to join{" "}
+                    <span className="text-emerald-400 font-bold">{inv.projectName}</span>
+                  </p>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      disabled={respondingTo === inv.projectId}
+                      onClick={() => void handleRespondToInvite(inv.projectId, true)}
+                      className="bg-emerald-500 text-slate-900 px-3 py-1 rounded-lg text-xs font-bold transition-all hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {respondingTo === inv.projectId ? "…" : "Accept"}
+                    </button>
+                    <button
+                      disabled={respondingTo === inv.projectId}
+                      onClick={() => void handleRespondToInvite(inv.projectId, false)}
+                      className="text-slate-400 hover:text-white px-2 py-1 text-xs transition-colors disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="mb-5 p-4 bg-slate-800/40 rounded-xl border border-slate-700/30 text-center">
             <Users className="h-8 w-8 text-slate-700 mx-auto mb-2" />
             <p className="text-sm font-semibold text-slate-400 mb-1">
@@ -903,20 +1145,63 @@ function SquadsCard({
             )}
           </div>
 
-          <div className="flex gap-2">
-            <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-violet-500/30 bg-violet-500/5 text-violet-400 text-xs font-bold hover:bg-violet-500/10 hover:border-violet-500/50 transition-all">
-              <Users className="h-3.5 w-3.5" />
-              Browse Squads
-            </button>
-            <button
-              disabled={!isGodMode}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-700/50 bg-slate-800/30 text-slate-400 text-xs font-bold hover:border-slate-600 hover:text-slate-300 hover:bg-slate-800/60 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              title={!isGodMode ? "Trust score required to create a squad" : undefined}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              Create Squad
-            </button>
-          </div>
+          {isCreatingSquad ? (
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder="Enter Squad Name..."
+                maxLength={32}
+                value={squadName}
+                onChange={(e) => setSquadName(e.target.value)}
+                disabled={isSubmitting}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-violet-500/50 transition-colors disabled:opacity-50"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !isSubmitting) void handleCreateSquad();
+                }}
+                autoFocus
+              />
+              {createError && (
+                <p className="text-xs text-red-400">{createError}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleCreateSquad()}
+                  disabled={isSubmitting || squadName.trim().length < 3}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-violet-500/30 bg-violet-500/5 text-violet-400 text-xs font-bold hover:bg-violet-500/10 hover:border-violet-500/50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {isSubmitting ? "Creating…" : "Confirm"}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreatingSquad(false);
+                    setSquadName("");
+                    setCreateError(null);
+                  }}
+                  disabled={isSubmitting}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-700/50 bg-slate-800/30 text-slate-400 text-xs font-bold hover:border-slate-600 hover:text-slate-300 hover:bg-slate-800/60 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-violet-500/30 bg-violet-500/5 text-violet-400 text-xs font-bold hover:bg-violet-500/10 hover:border-violet-500/50 transition-all">
+                <Users className="h-3.5 w-3.5" />
+                Browse Squads
+              </button>
+              <button
+                disabled={!isGodMode}
+                onClick={() => setIsCreatingSquad(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-700/50 bg-slate-800/30 text-slate-400 text-xs font-bold hover:border-slate-600 hover:text-slate-300 hover:bg-slate-800/60 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                title={!isGodMode ? "Trust score required to create a squad" : undefined}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Create Squad
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -948,11 +1233,15 @@ function CommandCenterInner() {
   const router = useRouter();
 
   const isGodMode = walletAddress === ADMIN_WALLET;
+  const isArchitectMode = ARCHITECT_MODE_ENABLED && walletAddress === ADMIN_WALLET;
 
   const authError = sp.get("error");
   const authErrorDesc = sp.get("error_description");
 
   // ── Dashboard state ────────────────────────────────────────────────────────
+  // refreshKey: incremented after mutations to re-trigger the dashboard fetch.
+  // router.refresh() alone doesn't re-run useEffect in client components.
+  const [refreshKey, setRefreshKey] = useState(0);
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -981,7 +1270,7 @@ function CommandCenterInner() {
     const fetchDashboard = async () => {
       try {
         // ── Round 1: all independent queries in parallel ───────────────────
-        const [myMetricsRes, top3Res, myMembershipRes, totalCountRes] =
+        const [myMetricsRes, top3Res, myMembershipRes, pendingInvitesRes, totalCountRes] =
           await Promise.all([
             // 1a. My trust score + tier
             supabase
@@ -997,15 +1286,24 @@ function CommandCenterInner() {
               .order("composite_score", { ascending: false })
               .limit(3),
 
-            // 1c. My active squad membership (newest first; use project_id)
+            // 1c. My active squad membership (newest first; use project_id + role)
             supabase
               .from("squad_members")
-              .select("project_id, squad_projects(project_name)")
+              .select("project_id, role, squad_projects(project_name)")
               .eq("user_id", userId)
               .eq("status", "active")
               .order("joined_at", { ascending: false })
               .limit(1)
               .maybeSingle(),
+
+            // 1e. My pending invites (for accept/reject UI)
+            supabase
+              .from("squad_members")
+              .select("project_id, squad_projects(project_name)")
+              .eq("user_id", userId)
+              .eq("status", "pending_invite")
+              .order("joined_at", { ascending: false })
+              .limit(10),
 
             // 1d. Total participants for "of N participants" display
             supabase
@@ -1025,6 +1323,7 @@ function CommandCenterInner() {
         // ── Parse my membership ────────────────────────────────────────────
         const membershipRow = myMembershipRes.data as {
           project_id: string;
+          role: string;
           squad_projects: { project_name: string } | null;
         } | null;
         const projectId = membershipRow?.project_id ?? null;
@@ -1114,15 +1413,29 @@ function CommandCenterInner() {
             projectId,
             memberCount: rawMembers.length,
             members: rawMembers,
+            role: membershipRow.role ?? "Member",
           };
         }
 
         if (!alive) return;
 
+        // ── Parse pending invites ─────────────────────────────────────
+        type RawPendingRow = {
+          project_id: string;
+          squad_projects: { project_name: string } | null;
+        };
+        const pendingInvites: PendingInvite[] = (
+          (pendingInvitesRes.data ?? []) as unknown as RawPendingRow[]
+        ).map((row) => ({
+          projectId: row.project_id,
+          projectName: row.squad_projects?.project_name ?? "Unknown Squad",
+        }));
+
         setData({
           trust,
           arena: { myScore, myRank, totalParticipants, leaderboard },
           squad,
+          pendingInvites,
         });
       } catch (err: unknown) {
         if (!alive) return;
@@ -1139,7 +1452,12 @@ function CommandCenterInner() {
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [userId, refreshKey]);
+
+  // ── Refresh helper: re-triggers dashboard fetch after mutations ────────────
+  const triggerRefresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   // ── Wallet Analysis: user-triggered via "Full Wallet Analysis" button ─────
   const handleAnalyze = useCallback(async () => {
@@ -1198,6 +1516,7 @@ function CommandCenterInner() {
     data?.arena?.myRank ?? null,
     isLoading,
     analysisData?.solBalance ?? null,
+    analysisData?.portfolioValueUsd,
   );
 
   // ── Auth gate ──────────────────────────────────────────────────────────────
@@ -1280,6 +1599,11 @@ function CommandCenterInner() {
                 tier={data?.trust?.tier ?? "Newbie"}
               />
             )}
+            {isArchitectMode && (
+              <span className="text-[10px] font-black uppercase tracking-widest text-violet-300 bg-gradient-to-r from-violet-500/20 to-amber-500/20 border border-violet-500/40 px-2.5 py-1 rounded-full animate-pulse">
+                Architect
+              </span>
+            )}
             <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 text-slate-400 text-xs font-semibold hover:border-slate-600 hover:text-slate-200 transition-all">
               <Activity className="h-3.5 w-3.5" />
               Activity Log
@@ -1347,6 +1671,11 @@ function CommandCenterInner() {
             agentCandidates={agentCandidates}
             matchesLoading={matchesLoading}
             matchesError={matchesError}
+            walletAddress={walletAddress}
+            userId={userId}
+            onSquadCreated={triggerRefresh}
+            pendingInvites={data?.pendingInvites ?? []}
+            onInviteResponded={triggerRefresh}
           />
         </div>
 

@@ -268,6 +268,74 @@ export async function getAsset(mintAddress: string): Promise<HeliusAssetInfo | n
 }
 
 // ──────────────────────────────────────────────────────────────
+// Helius Wallet Balances API (Beta) — Portfolio USD Value
+//
+// GET /v1/wallet/{address}/balances
+// Returns totalUsdValue aggregated across all priced tokens.
+// Pricing covers top 10K tokens by market cap, updated hourly.
+// Non-critical: returns null on any failure — never throws.
+// ──────────────────────────────────────────────────────────────
+
+const WALLET_BALANCES_TIMEOUT_MS = 8000;
+
+export async function getWalletBalances(
+  address: string,
+): Promise<{ totalUsdValue: number } | null> {
+  const apiKey = HELIUS_API_KEY;
+  if (!apiKey) {
+    // eslint-disable-next-line no-console
+    console.error("[getWalletBalances] HELIUS_API_KEY not configured.");
+    return null;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WALLET_BALANCES_TIMEOUT_MS);
+
+    const url = new URL(
+      `${HELIUS_API_BASE}/v1/wallet/${address}/balances`,
+    );
+    url.searchParams.set("limit", "1");
+    url.searchParams.set("showNfts", "false");
+    url.searchParams.set("showZeroBalance", "false");
+    url.searchParams.set("showNative", "true");
+
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "X-Api-Key": apiKey.trim() },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    if (!res.ok) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[getWalletBalances] HTTP ${res.status} for ${address.slice(0, 8)}...`,
+      );
+      return null;
+    }
+
+    const json = (await res.json()) as { totalUsdValue?: unknown };
+
+    const total =
+      typeof json.totalUsdValue === "number"
+        ? json.totalUsdValue
+        : Number(json.totalUsdValue);
+
+    if (!Number.isFinite(total)) return null;
+
+    // 0 is a valid portfolio value (empty wallet)
+    return { totalUsdValue: total };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[getWalletBalances] Exception:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
 // Helius Enhanced Transactions API — Unified Transaction Fetcher
 // Replaces the old N+1 pattern:
 //   OLD: getSignaturesForAddress → loop getParsedTransaction

@@ -195,7 +195,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
   const isExiled = project.dev_status === "EXILED" || project.dev_tier === "EXILED";
 
   const currentUserWallet = publicKey?.toBase58();
-  const isUserFounder = currentUserWallet?.toLowerCase() === project.claimed_by_full?.toLowerCase();
+  const isUserFounder = currentUserWallet === project.created_by_wallet_full;
 
   // YENİ: Tüm kart yerine sadece çerçeve stili.
   const getCardBaseStyle = () => {
@@ -351,7 +351,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
         project={{
           id: project.id,
           name: project.name,
-          claimed_by: project.claimed_by_full || project.claimed_by // Gerçek cüzdan adresini ilet
+          created_by_wallet: project.created_by_wallet_full || project.created_by_wallet // Gerçek cüzdan adresini ilet
         }}
         currentUserWallet={currentUserWallet}
         members={squadMembers} // DB'den çektiğin veriyi buraya vereceksin
