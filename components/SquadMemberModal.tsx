@@ -242,7 +242,7 @@ export function SquadMemberModal({
                   key={r.value}
                   type="button"
                   onClick={() => setSelectedRole(r.value as RoleType)}
-                  className={`flex flex-col items-start p-2.5 rounded-lg border text-left transition-all ${
+                  className={`flex flex-col items-start p-2.5 rounded-lg border text-left transition-colors ${
                     selectedRole === r.value
                       ? "border-blue-500 bg-blue-500/10 shadow-[0_0_10px_-2px_rgba(59,130,246,0.2)]"
                       : "border-slate-700/60 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600"
@@ -273,7 +273,7 @@ export function SquadMemberModal({
           <button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1 rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-sm text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors disabled:opacity-50">
             Cancel
           </button>
-          <button type="button" onClick={handleSubmit} disabled={isSubmitting || (isFounder && !targetWallet.trim()) || !!successMsg} className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-slate-50 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_15px_-3px_rgba(59,130,246,0.4)]">
+          <button type="button" onClick={handleSubmit} disabled={isSubmitting || (isFounder && !targetWallet.trim()) || !!successMsg} className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-slate-50 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-[0_0_15px_-3px_rgba(59,130,246,0.4)]">
             {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing...</> : isFounder ? "Sign & Send Invite" : "Sign & Send Request"}
           </button>
         </div>

@@ -37,13 +37,6 @@ interface LeaderboardRow {
 // Static data
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STATS = [
-  { value: "1,337+", label: "Wallets Analyzed" },
-  { value: "500+",   label: "Network Agents"   },
-  { value: "98+",    label: "Squads Formed"     },
-  { value: "99.1%",  label: "Trust Accuracy"   },
-];
-
 const FEATURES = [
   {
     icon:      BarChart3,
@@ -196,7 +189,7 @@ export default function Home() {
       <Navbar>
         <Link
           href="/command-center"
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-400 border border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/15 transition-all"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-400 border border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors"
         >
           Launch App
           <ArrowRight className="h-3.5 w-3.5" />
@@ -218,7 +211,7 @@ export default function Home() {
         <div className="absolute bottom-1/4 left-1/2 h-[400px] w-[400px] -translate-x-1/2 rounded-full bg-cyan-500/6 blur-[100px]" />
       </div>
 
-      <main className="relative">
+      <main id="main-content" className="relative">
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* HERO                                                                   */}
@@ -227,15 +220,15 @@ export default function Home() {
 
           {/* Live badge */}
           <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/8 px-4 py-1.5 text-xs font-semibold text-emerald-400 uppercase tracking-widest">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+            <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping motion-reduce:animate-none" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
             </span>
             Solana · Season 1 · Live Now
           </div>
 
           {/* Main title */}
-          <h1 className="mx-auto max-w-3xl text-6xl font-black leading-none tracking-tighter sm:text-7xl lg:text-8xl xl:text-9xl">
+          <h1 className="mx-auto max-w-3xl text-6xl font-black leading-none tracking-tighter sm:text-7xl lg:text-8xl xl:text-9xl text-balance">
             <span
               className="bg-gradient-to-br from-emerald-300 via-emerald-400 to-cyan-400 bg-clip-text text-transparent"
               style={{ filter: "drop-shadow(0 0 60px rgba(16,185,129,0.45))" }}
@@ -251,10 +244,9 @@ export default function Home() {
           </h1>
 
           {/* Subtitle */}
-          <p className="mx-auto mt-7 max-w-2xl text-base text-slate-400 leading-relaxed sm:text-xl">
-            Bridge your on-chain trading history with your Web2 reputation.{" "}
-            <span className="text-slate-300">Analyze your wallet, compete in the Arena,</span> and build{" "}
-            <span className="text-slate-300">elite Squads</span>.
+          <p className="mx-auto max-w-2xl text-base text-slate-400 leading-relaxed sm:text-xl">
+            Stop guessing who to trust. PumpMatch derives verifiable reputation from on-chain history,
+            helps you form elite squads, and unlocks trustless collaboration — from recruiting to revenue splitting.
           </p>
 
           {/* ── Single CTA cluster — no duplicates ───────────────────────── */}
@@ -263,7 +255,7 @@ export default function Home() {
               <>
                 <Link
                   href="/command-center"
-                  className="group relative inline-flex items-center gap-2.5 rounded-2xl bg-emerald-500 px-9 py-4 text-lg font-black text-slate-900 transition-all duration-200 hover:bg-emerald-400 hover:shadow-2xl hover:shadow-emerald-500/40 active:scale-95"
+                  className="group relative inline-flex items-center gap-2.5 rounded-2xl bg-emerald-500 px-9 py-4 text-lg font-black text-slate-900 transition-[background-color,box-shadow,transform] duration-200 hover:bg-emerald-400 hover:shadow-2xl hover:shadow-emerald-500/40 active:scale-95 motion-reduce:active:scale-100"
                 >
                   Enter Command Center
                   <span className="text-xl">🚀</span>
@@ -280,16 +272,16 @@ export default function Home() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-600">
             {["Powered by Solana", "Secured by Supabase", "PKCE Auth", "Non-custodial"].map((t) => (
               <span key={t} className="flex items-center gap-1.5">
-                <ShieldCheck className="h-3 w-3 text-emerald-700" />
+                <ShieldCheck className="h-3 w-3 text-emerald-700" aria-hidden="true" />
                 {t}
               </span>
             ))}
           </div>
 
           {/* Scroll hint */}
-          <div className="mt-16 opacity-30">
+          <div className="mt-16 opacity-30 motion-reduce:hidden">
             <div className="mx-auto h-10 w-6 rounded-full border border-slate-700 flex items-start justify-center pt-2">
-              <div className="h-2 w-1 rounded-full bg-slate-400 animate-bounce" />
+              <div className="h-2 w-1 rounded-full bg-slate-400 animate-bounce motion-reduce:animate-none" />
             </div>
           </div>
         </section>
@@ -396,26 +388,6 @@ export default function Home() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* STATS STRIP                                                            */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <section className="bg-slate-900/30 backdrop-blur-xl">
-          <div className="mx-auto max-w-5xl px-4 py-7">
-            <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
-              {STATS.map((s) => (
-                <div key={s.label} className="flex flex-col items-center gap-1 text-center">
-                  <span className="text-2xl font-black text-emerald-400 tabular-nums sm:text-3xl">
-                    {s.value}
-                  </span>
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-600">
-                    {s.label}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* FEATURES — bento-style 3-col glass cards                              */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="mx-auto max-w-6xl px-4 py-28 sm:py-36">
@@ -445,7 +417,7 @@ export default function Home() {
               return (
                 <div
                   key={f.title}
-                  className={`group relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/50 backdrop-blur-xl p-7 transition-all duration-300 hover:border-slate-600/70 hover:shadow-xl ${f.glow}`}
+                  className={`group relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/50 backdrop-blur-xl p-7 transition-colors duration-300 hover:border-slate-600/70 hover:shadow-xl ${f.glow}`}
                 >
                   {/* Top accent line */}
                   <div className={`absolute top-0 inset-x-0 h-px bg-gradient-to-r ${f.topBar}`} />
@@ -538,30 +510,26 @@ export default function Home() {
                 </div>
 
                 <h2 className="text-3xl font-black text-slate-100 mb-4 sm:text-4xl leading-tight">
-                  Ready to find your{" "}
+                  Ready to build{" "}
                   <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                    perfect squad?
+                    verified trust?
                   </span>
                 </h2>
 
                 <p className="text-slate-400 text-sm leading-relaxed mb-9 max-w-sm mx-auto">
-                  Connect your Phantom wallet and let your on-chain history speak for itself.
+                  Connect your wallet and let your on-chain history speak for itself.
                   It takes 10 seconds.
                 </p>
 
                 <div className="flex flex-col items-center gap-3">
                   {isConnected ? (
-                    <>
-                      <Link
-                        href="/command-center"
-                        className="group inline-flex items-center gap-2.5 rounded-2xl bg-emerald-500 px-9 py-4 text-lg font-black text-slate-900 transition-all duration-200 hover:bg-emerald-400 hover:shadow-2xl hover:shadow-emerald-500/40 active:scale-95"
-                      >
-                        Enter Command Center
-                        <span className="text-xl">🚀</span>
-                      </Link>
-                      {/* İŞTE BURAYA DA DISCONNECT BUTONUNU EKLİYORUZ */}
-                      <Web3LoginButton size="default" />
-                    </>
+                    <Link
+                      href="/command-center"
+                      className="group inline-flex items-center gap-2.5 rounded-2xl bg-emerald-500 px-9 py-4 text-lg font-black text-slate-900 transition-[background-color,box-shadow,transform] duration-200 hover:bg-emerald-400 hover:shadow-2xl hover:shadow-emerald-500/40 active:scale-95 motion-reduce:active:scale-100"
+                    >
+                      Go to Command Center
+                      <span className="text-xl">🚀</span>
+                    </Link>
                   ) : (
                     <Web3LoginButton size="lg" />
                   )}

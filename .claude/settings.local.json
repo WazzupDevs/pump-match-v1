@@ -4,7 +4,13 @@
       "Bash(npx tsc --noEmit --project tsconfig.json)",
       "Bash(npx tsc --noEmit)",
       "WebFetch(domain:www.helius.dev)",
-      "Bash(ls c:/Projelerim/PUMPMATCH/pump-match/lib/*.ts)"
+      "Bash(ls c:/Projelerim/PUMPMATCH/pump-match/lib/*.ts)",
+      "Bash(npx supabase projects list)",
+      "Bash(npx supabase gen types typescript --linked)",
+      "Bash(npx supabase db push)",
+      "Bash(xxd)",
+      "Bash(grep -v \"^$\")",
+      "Bash(npx tsc --noEmit --pretty false)"
     ]
   }
 }

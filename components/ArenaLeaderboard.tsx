@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -50,7 +50,29 @@ export function ArenaLeaderboard({
     projectName: string;
     founderWallet: string;
   } | null>(null);
-  const { signMessage } = useWallet();
+  const { publicKey, signMessage } = useWallet();
+  const adapterWallet = publicKey?.toBase58() ?? null;
+
+  // Derive the user's owned projects (for recruit capability on agent cards)
+  const myProjects = useMemo(
+    () =>
+      projects.filter(
+        (p) =>
+          (p.created_by_wallet_full ?? p.created_by_wallet ?? "").trim() ===
+            (adapterWallet ?? "").trim() &&
+          p.status !== "rugged",
+      ),
+    [projects, adapterWallet],
+  );
+  const canRecruit = myProjects.length > 0;
+  const founderProjectsList = useMemo(
+    () =>
+      myProjects.map((p) => ({
+        id: p.id,
+        name: p.name || p.symbol || p.id,
+      })),
+    [myProjects],
+  );
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -75,6 +97,11 @@ export function ArenaLeaderboard({
 
   const handleManualSync = useCallback(async () => {
     if (!walletAddress) return;
+
+    if (!publicKey) {
+      setSyncResult("Phantom wallet is disconnected or locked. Please click Connect on top right.");
+      return;
+    }
 
     // SECURITY (VULN-04): Prove admin wallet ownership before triggering sync.
     if (!signMessage) {
@@ -109,7 +136,7 @@ export function ArenaLeaderboard({
       setIsSyncing(false);
       setTimeout(() => setSyncResult(null), 4000);
     }
-  }, [fetchData, walletAddress, signMessage]);
+  }, [fetchData, walletAddress, publicKey, signMessage]);
 
   return (
     <section className="mt-14 md:mt-20">
@@ -125,8 +152,8 @@ export function ArenaLeaderboard({
             </span>
           </h2>
           <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-            Top network agents and squad projects ranked by trust score and
-            market performance.
+            Discover Solana&apos;s highest-rated agents and verified squads
+            backed by verifiable, on-chain reputation signals.
           </p>
         </div>
 
@@ -136,7 +163,7 @@ export function ArenaLeaderboard({
             <button
               type="button"
               onClick={() => setActiveTab("agents")}
-              className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 min-h-[44px] flex-1 sm:flex-initial text-sm font-medium transition-all duration-200 ${
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 min-h-[44px] flex-1 sm:flex-initial text-sm font-medium transition-colors duration-200 ${
                 activeTab === "agents"
                   ? "bg-emerald-500/15 text-emerald-400 shadow-inner shadow-emerald-500/5 border border-emerald-500/25"
                   : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -148,7 +175,7 @@ export function ArenaLeaderboard({
             <button
               type="button"
               onClick={() => setActiveTab("squads")}
-              className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 min-h-[44px] flex-1 sm:flex-initial text-sm font-medium transition-all duration-200 ${
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 min-h-[44px] flex-1 sm:flex-initial text-sm font-medium transition-colors duration-200 ${
                 activeTab === "squads"
                   ? "bg-purple-500/15 text-purple-400 shadow-inner shadow-purple-500/5 border border-purple-500/25"
                   : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -167,7 +194,7 @@ export function ArenaLeaderboard({
                 onClick={() => setIsClaimOpen(true)}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-xs font-bold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.03] active:scale-[0.97]"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-xs font-bold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 transition-[background-color,box-shadow,transform] shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.03] active:scale-[0.97]"
               >
                 <Rocket className="h-3.5 w-3.5" />
                 Claim Project
@@ -180,13 +207,13 @@ export function ArenaLeaderboard({
                 type="button"
                 onClick={handleManualSync}
                 disabled={isSyncing}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 min-h-[44px] min-w-[44px] text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-all disabled:opacity-50"
-                title="Sync Arena Data"
+                className="inline-flex items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/40 p-2.5 min-h-[44px] min-w-[44px] text-slate-700 hover:text-slate-400 hover:border-slate-600 transition-colors disabled:opacity-50"
+                aria-label="Sync arena data"
               >
                 {isSyncing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
               </button>
             )}
@@ -194,19 +221,21 @@ export function ArenaLeaderboard({
         </div>
 
         {/* Sync Result Toast */}
-        <AnimatePresence>
-          {syncResult && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-400"
-            >
-              <RefreshCw className="h-3 w-3" />
-              {syncResult}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div aria-live="polite" aria-atomic="true">
+          <AnimatePresence>
+            {syncResult && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-400"
+              >
+                <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                {syncResult}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* ── Loading State ── */}
         {isLoading ? (
@@ -215,7 +244,7 @@ export function ArenaLeaderboard({
               <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-xl animate-pulse" />
               <Loader2 className="relative h-7 w-7 text-emerald-400 animate-spin" />
             </div>
-            <p className="text-sm text-slate-500">Loading leaderboard...</p>
+            <p className="text-sm text-slate-500">Loading leaderboard\u2026</p>
           </div>
         ) : (
           <AnimatePresence mode="wait">
@@ -242,7 +271,14 @@ export function ArenaLeaderboard({
                   </div>
                 ) : (
                   agents.map((agent, i) => (
-                    <AgentCard key={agent.id} agent={agent} index={i} />
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      index={i}
+                      founderProjects={founderProjectsList}
+                      canRecruit={canRecruit}
+                      onInvited={fetchData}
+                    />
                   ))
                 )}
               </motion.div>
@@ -290,7 +326,7 @@ export function ArenaLeaderboard({
                                 founderWallet: project.created_by_wallet_full ?? project.created_by_wallet,
                               })
                             }
-                            className="text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg border border-slate-700/50 bg-slate-900/40 text-slate-500 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all font-medium"
+                            className="text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg border border-slate-700/50 bg-slate-900/40 text-slate-500 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors font-medium"
                           >
                             {project.created_by_wallet_full === walletAddress ? "Manage Squad" : "View Squad"}
                           </button>

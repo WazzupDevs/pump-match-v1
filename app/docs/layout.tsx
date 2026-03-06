@@ -9,9 +9,11 @@ export default function DocsLayout({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-300 font-sans flex">
       {/* Desktop Sidebar */}
-      <Suspense>
-        <DocsSidebar />
-      </Suspense>
+      <nav aria-label="Documentation">
+        <Suspense>
+          <DocsSidebar />
+        </Suspense>
+      </nav>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">

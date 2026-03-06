@@ -1,8 +1,26 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { Crown, Trophy, Medal, ShieldCheck } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Crown,
+  Trophy,
+  Medal,
+  ShieldCheck,
+  Loader2,
+  Check,
+  AlertTriangle,
+  ChevronDown,
+} from "lucide-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
 import type { EliteAgent } from "@/app/actions/arena";
+import { addSquadMemberAction } from "@/app/actions/arena";
+import {
+  generateCanonicalMessageV1,
+  type PumpMatchPayload,
+} from "@/lib/signature-shared";
 
 // ──────────────────────────────────────────────────────────────
 // Helpers
@@ -20,6 +38,12 @@ function generateAvatarColor(seed: string): string {
   }
   const hue = Math.abs(hash) % 360;
   return `hsl(${hue}, 60%, 45%)`;
+}
+
+function createNonceBase58(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bs58.encode(bytes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -72,16 +96,266 @@ function getCardStyle(rank: number): string {
 }
 
 // ──────────────────────────────────────────────────────────────
+// Invite state machine
+// ──────────────────────────────────────────────────────────────
+
+type InviteState = "idle" | "signing" | "sending" | "success" | "error";
+
+// ──────────────────────────────────────────────────────────────
+// Portal Dropdown
+// ──────────────────────────────────────────────────────────────
+
+interface PortalDropdownProps {
+  anchorRect: DOMRect;
+  items: { id: string; name: string }[];
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}
+
+function PortalDropdown({ anchorRect, items, onSelect, onClose }: PortalDropdownProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click and Escape
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  // Position above the anchor button
+  const style: React.CSSProperties = {
+    position: "fixed",
+    right: window.innerWidth - anchorRect.right,
+    bottom: window.innerHeight - anchorRect.top + 8,
+    zIndex: 9999,
+    minWidth: Math.max(anchorRect.width, 180),
+    maxWidth: 280,
+  };
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        ref={menuRef}
+        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+        transition={{ duration: 0.15, ease: "easeOut" }}
+        style={style}
+        className="rounded-xl border border-purple-500/30 bg-slate-900/95 p-2 shadow-xl backdrop-blur-md"
+      >
+        <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+          Select Project
+        </p>
+        {items.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => {
+              onClose();
+              onSelect(item.id);
+            }}
+            className="w-full truncate rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-purple-500/20 hover:text-purple-300"
+          >
+            {item.name}
+          </button>
+        ))}
+      </motion.div>
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
 // Agent Card
 // ──────────────────────────────────────────────────────────────
 
 interface AgentCardProps {
   agent: EliteAgent;
   index: number;
+  /** Projects the current founder owns — determines recruit capability */
+  founderProjects?: { id: string; name: string }[];
+  /** Whether the current user can recruit (e.g. is founder) */
+  canRecruit?: boolean;
+  /** Default role for the invite */
+  defaultRoleToInvite?: string;
+  /** Callback after successful invite */
+  onInvited?: (targetWallet: string) => void;
 }
 
-export function AgentCard({ agent, index }: AgentCardProps) {
+export function AgentCard({
+  agent,
+  index,
+  founderProjects,
+  canRecruit = false,
+  defaultRoleToInvite = "member",
+  onInvited,
+}: AgentCardProps) {
   const displayScore = Math.min(98, agent.trustScore + 5);
+
+  const { publicKey, signMessage, connected } = useWallet();
+  const [inviteState, setInviteState] = useState<InviteState>("idle");
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [menuAnchorRect, setMenuAnchorRect] = useState<DOMRect | null>(null);
+  const recruitBtnRef = useRef<HTMLButtonElement>(null);
+
+  const projects = founderProjects ?? [];
+  const showRecruit = canRecruit && projects.length > 0;
+
+  const closeMenu = useCallback(() => {
+    setShowProjectMenu(false);
+    setMenuAnchorRect(null);
+  }, []);
+
+  const handleRecruit = useCallback(
+    async (targetProjectId: string) => {
+      if (!publicKey || !signMessage) return;
+
+      const founderWallet = publicKey.toBase58();
+      const targetWallet = agent.address.trim();
+
+      if (founderWallet === targetWallet) {
+        setInviteError("Cannot recruit yourself.");
+        setInviteState("error");
+        return;
+      }
+
+      setInviteState("signing");
+      setInviteError(null);
+
+      try {
+        const nonce = createNonceBase58();
+        const timestamp = Date.now();
+
+        const payload: PumpMatchPayload = {
+          action: "invite",
+          chain: "solana-mainnet",
+          domain: "pumpmatch-governance",
+          env:
+            process.env.NODE_ENV === "production"
+              ? "production"
+              : "development",
+          nonce,
+          project: targetProjectId,
+          role: defaultRoleToInvite,
+          target: targetWallet,
+          timestamp,
+          v: 1,
+        };
+
+        const messageBytes = generateCanonicalMessageV1(payload);
+
+        let signatureBytes: Uint8Array;
+        try {
+          signatureBytes = await signMessage(messageBytes);
+        } catch {
+          setInviteState("idle");
+          return;
+        }
+
+        setInviteState("sending");
+
+        const result = await addSquadMemberAction({
+          projectId: targetProjectId,
+          targetWallet,
+          founderWallet,
+          role: defaultRoleToInvite,
+          nonce,
+          timestamp,
+          signature: bs58.encode(signatureBytes),
+        });
+
+        if (result.success) {
+          setInviteState("success");
+          onInvited?.(targetWallet);
+        } else {
+          setInviteError(result.message || "Invite failed.");
+          setInviteState("error");
+        }
+      } catch (err) {
+        console.error("[AgentCard] Recruit error:", err);
+        setInviteError("Unexpected error.");
+        setInviteState("error");
+      }
+    },
+    [publicKey, signMessage, agent.address, defaultRoleToInvite, onInvited],
+  );
+
+  const handleRecruitClick = useCallback(() => {
+    if (projects.length === 1) {
+      handleRecruit(projects[0].id);
+      return;
+    }
+    // Multi-project: toggle dropdown
+    if (showProjectMenu) {
+      closeMenu();
+    } else {
+      const rect = recruitBtnRef.current?.getBoundingClientRect();
+      if (rect) {
+        setMenuAnchorRect(rect);
+        setShowProjectMenu(true);
+      }
+    }
+  }, [projects, handleRecruit, showProjectMenu, closeMenu]);
+
+  const recruitLabel = () => {
+    switch (inviteState) {
+      case "signing":
+        return (
+          <>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Sign...
+          </>
+        );
+      case "sending":
+        return (
+          <>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Sending...
+          </>
+        );
+      case "success":
+        return (
+          <>
+            <Check className="h-3.5 w-3.5" />
+            Invited
+          </>
+        );
+      case "error":
+        return (
+          <>
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Retry
+          </>
+        );
+      default:
+        return (
+          <>
+            Recruit
+            {projects.length > 1 && (
+              <ChevronDown className="h-3 w-3 ml-0.5" />
+            )}
+          </>
+        );
+    }
+  };
+
+  const isBusy =
+    inviteState === "signing" ||
+    inviteState === "sending" ||
+    inviteState === "success";
+
+  const isRecruitDisabled = isBusy || !connected;
 
   return (
     <motion.div
@@ -156,13 +430,50 @@ export function AgentCard({ agent, index }: AgentCardProps) {
             +5 Bonus
           </p>
         </div>
+
         {/* Recruit CTA */}
-        <button
-          className="col-span-2 sm:col-auto border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/60 hover:shadow-[0_0_15px_rgba(168,85,247,0.15)] rounded-lg px-4 py-2 min-h-[44px] text-xs font-semibold transition-all duration-200"
-        >
-          Recruit
-        </button>
+        {showRecruit ? (
+          <button
+            ref={recruitBtnRef}
+            onClick={handleRecruitClick}
+            disabled={isRecruitDisabled}
+            className={`col-span-2 sm:col-auto inline-flex items-center justify-center gap-1.5 border rounded-lg px-4 py-2 min-h-[44px] text-xs font-semibold transition-all duration-200 ${
+              inviteState === "success"
+                ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                : inviteState === "error"
+                  ? "border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
+                  : "border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/60 hover:shadow-[0_0_15px_rgba(168,85,247,0.15)]"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {recruitLabel()}
+          </button>
+        ) : (
+          <button
+            className="col-span-2 sm:col-auto border border-purple-500/30 text-purple-400 rounded-lg px-4 py-2 min-h-[44px] text-xs font-semibold transition-all duration-200 opacity-50 cursor-not-allowed"
+            disabled
+            title="Claim a project to recruit agents"
+          >
+            Recruit
+          </button>
+        )}
       </div>
+
+      {/* Portal dropdown for multi-project selection */}
+      {showProjectMenu && menuAnchorRect && (
+        <PortalDropdown
+          anchorRect={menuAnchorRect}
+          items={projects}
+          onSelect={handleRecruit}
+          onClose={closeMenu}
+        />
+      )}
+
+      {/* Invite error tooltip */}
+      {inviteError && inviteState === "error" && (
+        <p className="text-[10px] text-rose-400 sm:absolute sm:right-5 sm:bottom-1.5">
+          {inviteError}
+        </p>
+      )}
 
       {/* Rank 1 ambient glow */}
       {agent.rank === 1 && (

@@ -209,7 +209,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
   const identityGlowClass = getIdentityGlowClass(profile.identityState);
 
   return (
-    <div className={`rounded-xl border bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 p-5 shadow-lg transition-all duration-300 relative ${identityGlowClass}`}>
+    <div className={`rounded-xl border bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 p-5 shadow-lg transition-colors duration-300 relative ${identityGlowClass}`}>
       {/* Header: Avatar + Username + Confidence Badge */}
       <div className="flex items-start gap-3 mb-4">
         <div
@@ -276,7 +276,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
                 {profile.matchConfidence}%
               </span>
               {/* Transparent Tooltip */}
-              <div className="absolute right-0 top-full mt-2 w-72 p-3 rounded-lg border border-slate-700/80 bg-slate-900/95 backdrop-blur-sm shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10 text-left">
+              <div className="absolute right-0 top-full mt-2 w-72 p-3 rounded-lg border border-slate-700/80 bg-slate-900/95 backdrop-blur-sm shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-colors duration-200 z-10 text-left">
                 <p className="text-xs font-semibold text-slate-300 mb-2">Confidence Breakdown</p>
                 <div className="space-y-1 text-[10px] text-slate-400">
                   <p>Base: <span className="text-slate-200">{profile.confidenceBreakdown.base}</span></p>
@@ -372,7 +372,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
         </div>
         <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${
+            className={`h-full rounded-full transition-colors duration-500 ${
               profile.trustScore >= 80
                 ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
                 : profile.trustScore >= 50
@@ -474,7 +474,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
               setShowSocials((v) => !v);
               if (onConnect) onConnect();
             }}
-            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-all duration-200"
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-colors duration-200"
           >
             <UserPlus className="h-4 w-4" />
             <span>{showSocials ? "Hide" : "Connect"}</span>
@@ -483,7 +483,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
         ) : (
           <button
             onClick={() => { if (onConnect) onConnect(); }}
-            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-all duration-200"
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/70 transition-colors duration-200"
           >
             <UserPlus className="h-4 w-4" />
             <span>Connect</span>
@@ -524,7 +524,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
               endorseState === "success" ? "Endorsed!" :
               "Endorse this member (community trust signal)"
             }
-            className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+            className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
               endorseState === "success" || endorseState === "already"
                 ? "border-amber-500/50 bg-amber-500/10 text-amber-400 cursor-default"
                 : endorseState === "error"

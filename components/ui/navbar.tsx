@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Logo } from "@/components/ui/logo";
-import { BookOpen, Copy, Check, Twitter, Github } from "lucide-react";
+import { BookOpen, Copy, Check, Twitter, Github, Rocket, Swords } from "lucide-react";
 
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -29,6 +29,7 @@ type NavbarProps = {
 
 export function Navbar({ children }: NavbarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [query, setQuery] = useState("");
   const [isInvalid, setIsInvalid] = useState(false);
@@ -45,7 +46,7 @@ export function Navbar({ children }: NavbarProps) {
     const normalized = normalizeAddress(query);
     if (!normalized) return; // empty input: do nothing, don't mark invalid
     if (BASE58_REGEX.test(normalized)) {
-      window.open(`/profile/${normalized}`, "_blank", "noopener,noreferrer");
+      router.push(`/profile/${normalized}`);
       setQuery("");
       setIsInvalid(false);
     } else {
@@ -69,7 +70,7 @@ export function Navbar({ children }: NavbarProps) {
           {/* CA Copy Badge */}
           <button
             onClick={handleCopy}
-            title={`Copy CA: ${CONTRACT_ADDRESS}`}
+            aria-label={copied ? "Copied!" : "Copy contract address"}
             className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
           >
             <span className="hidden sm:inline">CA: {shortCA(CONTRACT_ADDRESS)}</span>
@@ -85,10 +86,10 @@ export function Navbar({ children }: NavbarProps) {
             href={TWITTER_URL}
             target="_blank"
             rel="noopener noreferrer"
-            title="Follow on X"
+            aria-label="Follow PumpMatch on X"
             className="inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/50 transition-colors"
           >
-            <Twitter className="h-4 w-4" />
+            <Twitter className="h-4 w-4" aria-hidden="true" />
           </a>
 
           {/* GitHub Link */}
@@ -96,10 +97,10 @@ export function Navbar({ children }: NavbarProps) {
             href={GITHUB_URL}
             target="_blank"
             rel="noopener noreferrer"
-            title="View on GitHub"
+            aria-label="View source on GitHub"
             className="inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/50 transition-colors"
           >
-            <Github className="h-4 w-4" />
+            <Github className="h-4 w-4" aria-hidden="true" />
           </a>
 
           {/* Docs Link */}
@@ -115,16 +116,46 @@ export function Navbar({ children }: NavbarProps) {
             Docs
           </Link>
 
+          {/* Command Center Link */}
+          <Link
+            href="/command-center"
+            className={`hidden md:inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname?.startsWith("/command-center")
+                ? "text-emerald-400 bg-emerald-500/5"
+                : "text-slate-400 hover:text-emerald-400 hover:bg-slate-800/50"
+            }`}
+          >
+            <Rocket className="h-3.5 w-3.5" />
+            Command Center
+          </Link>
+
+          {/* Arena Link */}
+          <Link
+            href="/arena"
+            className={`hidden md:inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname?.startsWith("/arena")
+                ? "text-emerald-400 bg-emerald-500/5"
+                : "text-slate-400 hover:text-emerald-400 hover:bg-slate-800/50"
+            }`}
+          >
+            <Swords className="h-3.5 w-3.5" />
+            Arena
+          </Link>
+
           {/* Global wallet search */}
           <form onSubmit={handleSearchSubmit} className="hidden sm:block">
             <input
               type="text"
+              name="wallet-search"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
                 setIsInvalid(false);
               }}
-              placeholder="Wallet address…"
+              placeholder="Wallet address\u2026"
+              aria-label="Search wallet address"
+              autoComplete="off"
+              spellCheck={false}
               className={`w-36 rounded-lg border bg-slate-800/50 px-2.5 py-1.5 text-xs font-mono text-slate-200 placeholder:text-slate-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 ${
                 isInvalid ? "border-red-500/50 ring-1 ring-red-500/30" : "border-slate-700/50"
               }`}

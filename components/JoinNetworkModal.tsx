@@ -316,7 +316,7 @@ export function JoinNetworkModal({
                     setSelected(preset.label);
                     setSubmitError(null);
                   }}
-                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-all duration-150 ${
+                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors duration-150 ${
                     isActive
                       ? "border-emerald-400 text-emerald-400 bg-emerald-500/10 shadow-sm shadow-emerald-500/10"
                       : "border-zinc-700 text-slate-300 hover:border-emerald-500/40 hover:text-slate-100"
@@ -335,7 +335,7 @@ export function JoinNetworkModal({
                 setSelected(CUSTOM_SENTINEL);
                 setSubmitError(null);
               }}
-              className={`col-span-2 flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-all duration-150 ${
+              className={`col-span-2 flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors duration-150 ${
                 selected === CUSTOM_SENTINEL
                   ? "border-emerald-400 text-emerald-400 bg-emerald-500/10 shadow-sm shadow-emerald-500/10"
                   : "border-zinc-700 text-slate-300 hover:border-emerald-500/40 hover:text-slate-100"
@@ -448,7 +448,7 @@ export function JoinNetworkModal({
               type="button"
               onClick={handleConfirm}
               disabled={!canSubmit}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-sm font-semibold text-black hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 shadow-lg shadow-emerald-500/20"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-sm font-semibold text-black hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150 shadow-lg shadow-emerald-500/20"
             >
               {isSubmitting && (
                 <Loader2 className="h-4 w-4 animate-spin" />

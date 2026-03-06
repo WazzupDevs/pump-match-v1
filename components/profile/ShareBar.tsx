@@ -43,7 +43,7 @@ export function ShareBar({
           href={tweetUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-all hover:bg-white hover:scale-105 shadow-lg shadow-white/10"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-colors hover:bg-white hover:scale-105 shadow-lg shadow-white/10"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 3.827H5.078z"></path>
@@ -54,7 +54,7 @@ export function ShareBar({
         <button
           type="button"
           disabled
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-all shadow-lg shadow-white/10 opacity-60 cursor-not-allowed"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-900 transition-colors shadow-lg shadow-white/10 opacity-60 cursor-not-allowed"
           title="Connect this wallet to share"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
@@ -73,7 +73,7 @@ export function ShareBar({
             setTimeout(() => setCopied(false), 2000);
           } catch {}
         }}
-        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-xs font-semibold text-slate-300 transition-all hover:border-slate-500 hover:bg-slate-700/50"
+        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-xs font-semibold text-slate-300 transition-colors hover:border-slate-500 hover:bg-slate-700/50"
       >
         {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
         {copied ? "Copied!" : "Copy Link"}

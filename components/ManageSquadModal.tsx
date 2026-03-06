@@ -3,7 +3,12 @@
 import { useEffect } from "react";
 import { X, ShieldAlert, Wallet } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { SquadCommandCenter } from "./SquadCommandCenter";
+import {
+  SquadCommandCenter,
+  type OpsStatusValue,
+  type RoleSlot,
+  type ActiveProposal,
+} from "./SquadCommandCenter";
 
 type SquadMemberStatus =
   | "active"
@@ -35,6 +40,11 @@ interface ManageSquadModalProps {
   currentUserWallet?: string | null;
   members: SquadMember[];
   onRefresh: () => void;
+  opsStatus?: OpsStatusValue;
+  roleSlots?: RoleSlot[];
+  activeProposal?: ActiveProposal;
+  signedUserIds?: string[];
+  currentUserId?: string;
 }
 
 function maskWallet(address?: string | null) {
@@ -53,6 +63,11 @@ export default function ManageSquadModal({
   currentUserWallet,
   members,
   onRefresh,
+  opsStatus,
+  roleSlots,
+  activeProposal,
+  signedUserIds,
+  currentUserId,
 }: ManageSquadModalProps) {
   // Wallet-adapter is the source-of-truth for the acting wallet
   const { publicKey } = useWallet();
@@ -95,13 +110,22 @@ export default function ManageSquadModal({
   const isDisconnected = !actorWallet && !currentUserWallet;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700/80 bg-slate-950 shadow-2xl shadow-emerald-500/10 animate-in zoom-in-95 duration-200 overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+      style={{ overscrollBehavior: "contain" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="manage-squad-modal-title"
+        className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700/80 bg-slate-950 shadow-2xl shadow-emerald-500/10 animate-in zoom-in-95 duration-200 overflow-hidden"
+      >
 
         {/* MODAL HEADER */}
         <div className="flex items-start justify-between border-b border-slate-800 bg-slate-900/50 p-5 shrink-0">
           <div>
-            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+            <h2 id="manage-squad-modal-title" className="text-xl font-bold text-slate-100 flex items-center gap-2">
               Command Center: <span className="text-emerald-400">{project.name}</span>
             </h2>
             {effectiveWallet && (
@@ -117,9 +141,10 @@ export default function ManageSquadModal({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close modal"
             className="rounded-full p-2 text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors"
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -154,6 +179,11 @@ export default function ManageSquadModal({
                 currentUserWallet={effectiveWallet}
                 members={members}
                 onRefresh={onRefresh}
+                opsStatus={opsStatus}
+                roleSlots={roleSlots}
+                activeProposal={activeProposal}
+                signedUserIds={signedUserIds}
+                currentUserId={currentUserId}
               />
             </>
           )}

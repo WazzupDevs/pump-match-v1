@@ -5,16 +5,16 @@ import { useSearchParams } from "next/navigation";
 import {
   IntroSection,
   TrustSection,
-  GodModeSection,
-  TokenomicsSection,
+  SquadOsSection,
+  RoadmapSection,
 } from "@/components/docs/content-sections";
 
 // Content Map pattern: each tab key maps to a component
 const contentMap: Record<string, React.ReactNode> = {
   intro: <IntroSection />,
   trust: <TrustSection />,
-  "god-mode": <GodModeSection />,
-  tokenomics: <TokenomicsSection />,
+  "squad-os": <SquadOsSection />,
+  roadmap: <RoadmapSection />,
 };
 
 function DocsContent() {

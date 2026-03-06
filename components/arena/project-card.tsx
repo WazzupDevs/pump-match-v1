@@ -8,31 +8,10 @@ import {
   Users
 } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { PowerSquadProject } from "@/app/actions/arena"; 
 import { FounderBadge } from "@/components/arena/founder-badge";
 import { TrustBadge } from "@/components/arena/trust-badge";
-import { getSquadMembersAction } from "@/app/actions/arena";
-
-// 🔥 YENİ: Squad Yönetim Modalı
-import ManageSquadModal from "@/components/ManageSquadModal"; // import { getSquadMembers } from "@/lib/db";
-
-type SquadMemberStatus =
-  | "active"
-  | "pending_invite"
-  | "pending_application"
-  | "rejected"
-  | "revoked"
-  | "kicked"
-  | "left";
-
-type SquadMember = {
-  id: string;
-  wallet_address: string;
-  role: string;
-  status: SquadMemberStatus;
-  joined_at?: string;
-}; 
 
 // ──────────────────────────────────────────────────────────────
 // Formatters
@@ -79,7 +58,7 @@ function RiskBandBadge({ band, score }: { band: string, score: number }) {
   const config = configs[band] || configs.EXTREME;
 
   return (
-    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-all ${config.color}`}>
+    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${config.color}`}>
       {config.icon}
       {config.label} {score > 0 && `(${score})`}
     </div>
@@ -183,11 +162,7 @@ interface ProjectCardProps {
 export function ProjectCard({ project, index }: ProjectCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   
-  // 🔥 YENİ: Modal State'leri ve Cüzdan
-  const [isManageModalOpen, setIsManageModalOpen] = useState(false);
-  const [squadMembers, setSquadMembers] = useState<SquadMember[]>([]); 
   const { publicKey } = useWallet();
-  const router = useRouter();
 
   const isGhost = project.status === "ghost";
   const isFounder = project.claim_tier === "founder";
@@ -202,12 +177,12 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
     if (isGhost && !isExiled) return "grayscale opacity-60 border-slate-800/30 bg-slate-950/30";
     if (isExiled || project.project_risk_band === "RUGGED") return "border-red-500/40 bg-gradient-to-br from-red-950/30 to-slate-950/90 shadow-[0_0_20px_-5px_rgba(239,68,68,0.2)] grayscale-[0.5]";
     
-    let style = `border-slate-700/40 bg-slate-950/70 hover:border-slate-600/60 transition-all duration-300 ${isExpanded ? 'bg-slate-900/90 border-slate-600/80 shadow-lg' : ''}`;
+    let style = `border-slate-700/40 bg-slate-950/70 hover:border-slate-600/60 transition-colors duration-300 ${isExpanded ? 'bg-slate-900/90 border-slate-600/80 shadow-lg' : ''}`;
     
     if (project.project_risk_band === "SAFE") {
-      style = `transition-all duration-300 ${isExpanded ? 'border-emerald-500/60 bg-slate-900/95 shadow-[0_0_25px_-5px_rgba(16,185,129,0.25)]' : 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 to-slate-950/90 shadow-[0_0_15px_-3px_rgba(16,185,129,0.15)] hover:border-emerald-500/50'}`;
+      style = `transition-colors duration-300 ${isExpanded ? 'border-emerald-500/60 bg-slate-900/95 shadow-[0_0_25px_-5px_rgba(16,185,129,0.25)]' : 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 to-slate-950/90 shadow-[0_0_15px_-3px_rgba(16,185,129,0.15)] hover:border-emerald-500/50'}`;
     } else if (project.project_risk_band === "LOW_RISK") {
-      style = `transition-all duration-300 ${isExpanded ? 'border-blue-500/50 bg-slate-900/95 shadow-[0_0_20px_-5px_rgba(59,130,246,0.2)]' : 'border-blue-500/20 bg-gradient-to-br from-blue-950/10 to-slate-950/80 hover:border-blue-500/40'}`;
+      style = `transition-colors duration-300 ${isExpanded ? 'border-blue-500/50 bg-slate-900/95 shadow-[0_0_20px_-5px_rgba(59,130,246,0.2)]' : 'border-blue-500/20 bg-gradient-to-br from-blue-950/10 to-slate-950/80 hover:border-blue-500/40'}`;
     }
 
     if (rank === 1) style += ` relative z-10 scale-[1.02] bg-gradient-to-br from-yellow-500/10 to-transparent shadow-[0_0_30px_-5px_rgba(250,204,21,0.2)] ${isExpanded ? 'border-yellow-400/80' : 'border-yellow-400/50'} ${project.project_risk_band === 'SAFE' ? 'ring-1 ring-emerald-500/50' : ''}`;
@@ -215,22 +190,6 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
     if (rank === 3) style += ` bg-gradient-to-br from-orange-500/5 to-transparent shadow-[0_0_20px_-5px_rgba(251,146,60,0.15)] ${isExpanded ? 'border-orange-400/60' : 'border-orange-400/40'}`;
     
     return style;
-  };
-
-  // Kartı açtığımızda veya Modal'ı açmak istediğimizde o projeye ait üyeleri DB'den çekmemiz lazım.
-  // Gerçek uygulamada bu veriyi üst component'ten veya bir SWR/React-Query ile çekebilirsin.
-  // Şimdilik Modal'a boş array (veya mock) gönderiyorum, entegre ederken buraya fetch eklemelisin.
-  const handleOpenManageModal = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsManageModalOpen(true); // 1. Modalı anında aç (Kullanıcıyı bekletme, hızlı hissettirsin)
-    
-    // 2. Arka planda gerçek veriyi çek
-    const result = await getSquadMembersAction(project.id);
-    
-    // 3. Veri geldiyse State'i güncelle (Modal anında dolu verilerle güncellenecek)
-    if (result.success && result.data) {
-      setSquadMembers(result.data as SquadMember[]);
-    }
   };
 
   return (
@@ -249,7 +208,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
               isExiled ? "bg-red-950 border border-red-500/30 text-red-500" : isGhost ? "bg-slate-800/80 border border-slate-700/60 text-slate-600" : rank === 1 ? "bg-gradient-to-br from-yellow-500/25 to-amber-600/15 border border-yellow-500/25 text-yellow-300" : rank <= 3 ? "bg-gradient-to-br from-purple-500/20 to-amber-500/10 border border-purple-500/20 text-purple-200" : "bg-gradient-to-br from-purple-500/15 to-emerald-500/10 border border-purple-500/10 text-purple-300"
             }`}
           >
-            {isGhost && !isExiled ? <Ghost className="h-5 w-5" /> : <span className={`text-[11px] leading-none tracking-tight ${isExiled ? "line-through opacity-70" : ""}`}>${(project.symbol || project.name || "??").slice(0, 3)}</span>}
+            {isGhost && !isExiled ? <Ghost className="h-5 w-5" /> : <span className={`text-[11px] leading-none tracking-tight ${isExiled ? "line-through opacity-70" : ""}`}>${(project.symbol || "???").slice(0, 4)}</span>}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -322,45 +281,29 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
           >
             <TrustBreakdownPanel project={project} />
             
-            {/* 🔥 YENİ: SQUAD YÖNETİM BUTONLARI (Kart Açıldığında Görünür) */}
+            {/* Squad actions */}
             <div className="pt-4 mt-2 border-t border-slate-800/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-slate-500" />
                 <span className="text-xs text-slate-400">{project.memberCount} Squad Members</span>
               </div>
               
-              <button
-                onClick={handleOpenManageModal}
-                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg font-semibold transition-all duration-200 ${
+              <Link
+                href={`/command-center/${project.id}`}
+                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg font-semibold transition-colors duration-200 ${
                   isUserFounder
                     ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/20 hover:border-indigo-400/60 hover:shadow-[0_0_18px_rgba(99,102,241,0.25)]"
                     : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/20 hover:border-emerald-400/60 hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]"
                 }`}
+                onClick={(e) => e.stopPropagation()}
               >
-                {isUserFounder ? "Manage Squad" : "Apply to Squad"}
-              </button>
+                {isUserFounder ? "Manage Squad" : "View Squad"}
+              </Link>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* 🔥 YENİ: MODAL'IN KENDİSİ */}
-      <ManageSquadModal 
-        isOpen={isManageModalOpen}
-        onClose={() => setIsManageModalOpen(false)}
-        project={{
-          id: project.id,
-          name: project.name,
-          created_by_wallet: project.created_by_wallet_full || project.created_by_wallet // Gerçek cüzdan adresini ilet
-        }}
-        currentUserWallet={currentUserWallet}
-        members={squadMembers} // DB'den çektiğin veriyi buraya vereceksin
-        onRefresh={() => {
-          // Aksiyon başarılı olunca sayfayı yenile
-          router.refresh();
-        }}
-      />
-      
     </motion.div>
   );
 }

@@ -26,21 +26,21 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     key: "trust",
-    label: "Trust Score",
+    label: "Trust Engine",
     icon: <ShieldCheck className="h-4 w-4" />,
-    group: "Core Concepts",
+    group: "Core Infrastructure",
   },
   {
-    key: "god-mode",
-    label: "God Mode",
+    key: "squad-os",
+    label: "Squad OS",
     icon: <Crosshair className="h-4 w-4" />,
-    group: "Core Concepts",
+    group: "Core Infrastructure",
   },
   {
-    key: "tokenomics",
-    label: "$MATCH Utility",
+    key: "roadmap",
+    label: "Master Roadmap",
     icon: <Coins className="h-4 w-4" />,
-    group: "Economics",
+    group: "Vision",
   },
 ];
 
@@ -99,7 +99,7 @@ export function DocsSidebar() {
                     <button
                       type="button"
                       onClick={() => navigate(item.key)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                         isActive
                           ? "text-emerald-400 bg-emerald-500/5 border-l-2 border-emerald-400 pl-4"
                           : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-l-2 border-transparent pl-4"
@@ -127,7 +127,7 @@ export function DocsSidebar() {
         <p className="text-[10px] text-slate-600 leading-relaxed">
           Pump Match v1.0
           <br />
-          Pump.fun Hackathon 2026
+          The Trust Layer for Solana
         </p>
       </div>
     </aside>

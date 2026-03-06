@@ -183,7 +183,7 @@ export default async function ProfilePage({
                 </div>
                 <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
                   <div
-                    className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-1000"
+                    className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-[width] duration-1000"
                     style={{
                       width: `${Math.max(0, Math.min(100, Number.isFinite(pump.jeetScore) ? pump.jeetScore : 0))}%`,
                     }}
@@ -202,7 +202,7 @@ export default async function ProfilePage({
                 </div>
                 <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
                   <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000"
+                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-[width] duration-1000"
                     style={{
                       width: `${Math.max(0, Math.min(100, Number.isFinite(pump.rugMagnetScore) ? pump.rugMagnetScore : 0))}%`,
                     }}

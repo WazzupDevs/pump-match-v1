@@ -591,20 +591,24 @@ export async function getSquadMembersAction(projectId: string) {
     const terminalList = `(${TERMINAL_STATUSES.map((s) => `"${s}"`).join(",")})`;
     const { data, error } = await supabaseAdmin
       .from("squad_members")
-      .select("id, project_id, role, status, joined_at, left_at, user_id, profiles(wallet_address)")
+      .select("id, project_id, role, status, joined_at, left_at, user_id, profiles(wallet_address, x_handle)")
       .eq("project_id", projectId)
       .not("status", "in", terminalList);
 
     if (error) throw error;
 
     const members = (data ?? []).map((row: any) => {
-      const addr = typeof row.profiles?.wallet_address === "string" && row.profiles.wallet_address.length > 0
-        ? row.profiles.wallet_address
-        : "Unknown";
+      const p = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      const rawWallet = p?.wallet_address;
+      const addr = typeof rawWallet === "string" && rawWallet.length > 0 ? rawWallet : "Unknown";
       const display =
         addr !== "Unknown" && addr.length > 8
           ? `${addr.slice(0, 4)}...${addr.slice(-4)}`
           : addr;
+
+      if (addr === "Unknown") {
+        console.warn(`[getSquadMembersAction] Missing wallet for user_id=${row.user_id}, project=${projectId}`);
+      }
 
       return {
         id: row.id as string,
