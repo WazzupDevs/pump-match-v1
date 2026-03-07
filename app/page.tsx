@@ -9,14 +9,14 @@ import { useSquadAuth } from "@/components/providers/SquadProvider";
 import { supabase } from "@/lib/supabase/client";
 import {
   BarChart3,
-  Users,
   ShieldCheck,
   Zap,
   ArrowRight,
   Star,
   TrendingUp,
-  Swords,
-  GitMerge,
+  Radio,
+  BadgeCheck,
+  Award,
   Trophy,
   Crown,
   Medal,
@@ -46,41 +46,41 @@ const FEATURES = [
     glow:      "group-hover:shadow-cyan-500/10",
     badge:     "On-Chain Intel",
     title:     "Analyze Your Wallet",
-    desc:      "Deep dive into your on-chain history. Calculate 30-day PnL, token win rates, and get assigned a secure Trust Score.",
+    desc:      "Deep dive into your on-chain history. Calculate Style and Quality scores, token win rates, and get assigned a secure behavioral profile.",
     bullets: [
-      "30-day PnL & win-rate breakdown",
-      "Pump.fun trading DNA decoded",
-      "Verified Trust Score assigned",
+      "Style and Quality score breakdown",
+      "Token win rates and hold patterns",
+      "Verified behavioral profile assigned",
     ],
   },
   {
-    icon:      Swords,
+    icon:      Radio,
     iconBg:    "bg-amber-500/10",
     iconColor: "text-amber-400",
     topBar:    "from-amber-500/0 via-amber-500/60 to-amber-500/0",
     glow:      "group-hover:shadow-amber-500/10",
-    badge:     "Season 1 Live",
-    title:     "The Arena Leaderboards",
-    desc:      "Compete with top Web3 operators. Climb the ranks based on your verified trading reputation and Trust Score.",
+    badge:     "Token Intel",
+    title:     "Analyze Token Communities",
+    desc:      "Move beyond individual wallets. Analyze token holder compositions, detect suspicious clusters, and evaluate community quality at scale.",
     bullets: [
-      "Real-time trust rankings",
-      "Tier-based progression system",
-      "Season rewards & exclusive badges",
+      "Holder composition breakdown",
+      "Suspicious cluster detection",
+      "Community quality scoring",
     ],
   },
   {
-    icon:      Users,
+    icon:      BadgeCheck,
     iconBg:    "bg-violet-500/10",
     iconColor: "text-violet-400",
     topBar:    "from-violet-500/0 via-violet-500/60 to-violet-500/0",
     glow:      "group-hover:shadow-violet-500/10",
-    badge:     "Alpha Protocol",
-    title:     "Build Elite Squads",
-    desc:      "Match with compatible wallets. Pool your alpha, assign roles, and dominate the markets as a team.",
+    badge:     "Public Proof",
+    title:     "Establish Verifiable Proof",
+    desc:      "Mint your behavioral profile as a shareable Trust Receipt. Use your proven on-chain history as a coordination asset across Solana.",
     bullets: [
-      "AI-powered compatibility scoring",
-      "Role-based squad assembly",
-      "On-chain endorsements & rep",
+      "Shareable Trust Receipt artifact",
+      "Explainable score breakdown",
+      "Portable reputation across Solana",
     ],
   },
 ] as const;
@@ -99,16 +99,16 @@ const HOW_IT_WORKS = [
     icon:  Zap,
     color: "text-cyan-400",
     bg:    "bg-cyan-500/10 border-cyan-500/20",
-    title: "Scan Your DNA",
-    desc:  "We analyse your on-chain history, Pump.fun trades, and token activity to compute your Trust Score.",
+    title: "Analyze Your Behavior",
+    desc:  "We analyze your on-chain history, token activity, and trading patterns to compute your behavioral scores.",
   },
   {
     step:  "03",
-    icon:  GitMerge,
+    icon:  Award,
     color: "text-violet-400",
     bg:    "bg-violet-500/10 border-violet-500/20",
-    title: "Match & Dominate",
-    desc:  "Get matched with wallets that complement your strengths. Build your squad and enter the Arena.",
+    title: "Build Your Reputation",
+    desc:  "Get a verifiable, explainable proof of your on-chain behavior. Share your Trust Receipt and establish your reputation on Solana.",
   },
 ] as const;
 
@@ -400,18 +400,18 @@ export default function Home() {
               <span className="inline-block text-slate-500">&rarr;</span>
               <span className="inline-block">&nbsp;</span>
               <span className="inline-block bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
-                Compete
+                Interpret
               </span>
               <span className="inline-block">&nbsp;</span>
               <span className="inline-block text-slate-500">&rarr;</span>
               <span className="inline-block">&nbsp;</span>
               <span className="inline-block bg-linear-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
-                Squad&nbsp;Up
+                Prove
               </span>
             </h2>
             <p className="mx-auto mt-5 max-w-lg text-slate-500 text-sm leading-relaxed">
-              Three interconnected systems built to surface the sharpest wallets, rank them honestly,
-              and unite them into unstoppable squads.
+              Three interconnected systems built to surface behavioral intelligence, translate it into
+              explainable signals, and establish verifiable on-chain reputation.
             </p>
           </div>
 
