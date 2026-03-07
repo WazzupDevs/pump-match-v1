@@ -114,7 +114,7 @@ export function IntroSection() {
     {
       icon: <Brain className="h-4 w-4 text-emerald-400" aria-hidden="true" />,
       label: "Behavior Over Balance",
-      desc: "We measure timing, execution, holding behavior, consistency, and risk patterns — not just balances or one-off wins.",
+      desc: "We measure timing, execution, holding behavior, consistency, and risk patterns  not just balances or one-off wins.",
     },
     {
       icon: <Eye className="h-4 w-4 text-emerald-400" aria-hidden="true" />,
@@ -150,7 +150,7 @@ export function IntroSection() {
       step: "03",
       title: "Coordinate",
       icon: <Users className="h-5 w-5 text-emerald-400" aria-hidden="true" />,
-      desc: "As the system matures, these signals power public proof, reputation surfaces, token community intelligence, and high-signal squad coordination.",
+      desc: "As the system matures, these signals power public proof, reputation surfaces, token community intelligence, and high signal squad coordination.",
     },
   ];
 
@@ -181,8 +181,8 @@ export function IntroSection() {
       </P>
       <P>
         PumpMatch helps users understand how wallets behave, how communities are
-        composed, and — over time — how high-signal teams can be formed using
-        intelligence instead of guesswork.
+        composed, and  over time  how high signal teams can be formed using
+        intelligence instead of guesswork. 
       </P>
 
       {/* ── The Coordination Problem ── */}
@@ -346,12 +346,12 @@ export function TrustSection() {
 
       <H3>1. Wallet Age & Sybil Resistance</H3>
       <P>
-        How long has this wallet been active? We detect the first transaction to calculate age. Newer wallets face severe score penalties—filtering out freshly created bot wallets and "burner" addresses used for rug pulls.
+        How long has this wallet been active? We detect the first transaction to calculate age. Newer wallets face severe score penalties filtering out freshly created bot wallets and "burner" addresses used for rug pulls.
       </P>
-
+  
       <H3>2. Asset Portfolio & Diversity</H3>
       <P>
-        We analyze SOL balances, token holdings, and NFT assets. A highly diversified portfolio with historical holding patterns signals a real, engaged network participant rather than a single-purpose bot.
+        We analyze SOL balances, token holdings, and NFT assets. A highly diversified portfolio with historical holding patterns signals a real, engaged network participant rather than a single purpose bot.
       </P>
 
       <H3>3. Transaction History</H3>
@@ -381,7 +381,7 @@ export function SquadOsSection() {
       <H1>Squad OS</H1>
 
       <P>
-        Finding a team is only step one. <strong>Squad OS</strong> is the operational engine that turns a loose group of wallets into a disciplined, execution-ready protocol entity.
+        Finding a team is only step one. <strong>Squad OS</strong> is the operational engine that turns a loose group of wallets into a disciplined, execution ready protocol entity.
       </P>
 
       <H2>The Pipeline to Launch</H2>
@@ -399,7 +399,7 @@ export function SquadOsSection() {
           },
           {
             label: "2. Split Proposal",
-            desc: "Once slots are filled, the Founder proposes a Revenue Split (measured in Basis Points - BPS). For example: 70% Founder, 15% Developer, 15% Marketer.",
+            desc: "Once slots are filled, the Founder proposes a Revenue Split (measured in Basis Points, BPS). For example: 70% Founder, 15% Developer, 15% Marketer.",
             icon: <Filter className="h-5 w-5 text-blue-400" />,
             border: "border-blue-500/30",
           },
@@ -463,7 +463,7 @@ export function IntelligenceCoreV2Section() {
       num: "02",
       label: "Derived Features",
       sublabel: "Versioned Measurements",
-      desc: "Computed metrics extracted from raw events by a versioned pipeline. Re-derivable from scratch — features are never the source of truth.",
+      desc: "Computed metrics extracted from raw events by a versioned pipeline. Re-derivable from scratch  features are never the source of truth.",
       examples: "median hold time · win rate · launch-window entry ratio",
       icon: <Filter className="h-5 w-5 text-blue-400" />,
       border: "border-blue-500/30",
@@ -472,7 +472,7 @@ export function IntelligenceCoreV2Section() {
       num: "03",
       label: "Interpreted Scores",
       sublabel: "Versioned Algorithmic Models",
-      desc: "Style, quality, and suspiciousness scores produced by versioned models over derived features. Historical scores are never overwritten — new model versions produce new rows.",
+      desc: "Style, quality, and suspiciousness scores produced by versioned models over derived features. Historical scores are never overwritten  new model versions produce new rows.",
       examples: "style score · quality score · suspiciousness score",
       icon: <TrendingUp className="h-5 w-5 text-purple-400" />,
       border: "border-purple-500/30",
@@ -575,7 +575,7 @@ export function IntelligenceCoreV2Section() {
 
       <P>
         PumpMatch is a behavioral wallet intelligence layer. We do not score
-        vanity — balance size or one lucky win — we score{" "}
+        vanity — balance size or one lucky win  we score{" "}
         <strong className="text-slate-200">behavior</strong>. The real signal
         comes from entry timing, exit discipline, holding duration, and risk
         management repeated consistently over time.
@@ -591,7 +591,7 @@ export function IntelligenceCoreV2Section() {
 
       <P>
         Our intelligence engine strictly enforces four non-overlapping data
-        layers. Data flows <em>downward only</em> — presentation never
+        layers. Data flows <em>downward only</em>  presentation never
         influences scoring, and scores never alter raw events.
       </P>
 
@@ -626,7 +626,7 @@ export function IntelligenceCoreV2Section() {
       </div>
 
       <CodeBlock>{`// Design Law enforcement
-// Data flows downward only — never upward.
+// Data flows downward only  never upward.
 
 Raw Events      ──► immutable, append-only (swaps, transfers)
   │
@@ -753,7 +753,7 @@ Presentation    ──► UI artifacts only (persona label, receipt, badge)`}</C
 
       <ul className="space-y-2 my-4 ml-1">
         {[
-          "High-churn ratios — the fraction of holders who fully exited in the trailing 7 days.",
+          "High churn ratios  the fraction of holders who fully exited in the trailing 7 days.",
           "Suspicious cluster detection — coordinated buy/sell patterns across related wallets.",
           "Quality-weighted holder score — the mean behavioral quality score of active holders.",
           "Wash-trade likelihood — statistical anomalies inconsistent with organic volume.",
@@ -804,7 +804,7 @@ export function RoadmapSection() {
         "Establish PumpMatch as the most credible way to understand how a Solana wallet behaves.",
       desc: "A user connects a wallet and receives style analysis, quality analysis, suspiciousness signals, and a shareable public proof artifact.",
       aiRole:
-        "AI acts as an explainer, summarizing wallet behavior into human-readable reports. It does not replace deterministic scoring.",
+        "AI acts as an explainer, summarizing wallet behavior into human readable reports. It does not replace deterministic scoring.",
     },
     {
       num: "02",
@@ -815,21 +815,21 @@ export function RoadmapSection() {
       border: "border-amber-500/30",
       icon: <Activity className="h-5 w-5 text-amber-400" aria-hidden="true" />,
       objective: "Expand from individual behavior to crowd behavior.",
-      desc: "A user inputs a token and receives a behavioral breakdown of its holder base: fresh wallet concentration, high-churn ratios, conviction holder density, and suspicious cluster signals.",
+      desc: "A user inputs a token and receives a behavioral breakdown of its holder base: fresh wallet concentration, high churn ratios, conviction holder density, and suspicious cluster signals.",
       aiRole:
         "AI narrates suspicious cluster patterns and explains token community composition.",
     },
     {
       num: "03",
       name: "Squad OS",
-      sublabel: "Coordination & High-Signal Matching",
+      sublabel: "Coordination & High Signal Matching",
       status: "Future",
       statusClass: "text-purple-400",
       border: "border-purple-500/30",
       icon: <Users className="h-5 w-5 text-purple-400" aria-hidden="true" />,
       objective:
         "Transform intelligence into coordination infrastructure.",
-      desc: "Once a base of behavioral intelligence and public identities exists, we enable high-signal team formation. The Weak Link Principle evaluates lowest-quality member risk and collective fragility patterns.",
+      desc: "Once a base of behavioral intelligence and public identities exists, we enable high signal team formation. The Weak Link Principle evaluates lowest quality member risk and collective fragility patterns.",
       aiRole:
         "AI acts as a coordination analyst, explaining why a team looks strong or fragile.",
     },
@@ -865,7 +865,7 @@ export function RoadmapSection() {
         . We are not building another token dashboard or a social feed disguised
         as analytics. We are building the system that helps users understand how
         wallets behave, how communities are composed, and eventually, how
-        high-signal teams can be formed using behavior instead of hype.
+        high signal teams can be formed using behavior instead of hype.
       </P>
 
       <Callout
@@ -888,7 +888,7 @@ export function RoadmapSection() {
       <H2>2. Strategic Thesis</H2>
 
       <P>
-        Most crypto products stop at data display — balances, charts — or basic
+        Most crypto products stop at data display  balances, charts  or basic
         risk heuristics. PumpMatch goes further:{" "}
         <strong className="text-slate-200">we interpret behavior</strong>.
       </P>

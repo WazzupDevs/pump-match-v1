@@ -315,7 +315,7 @@ function CockpitInner() {
 
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
               <Rocket className="inline-block h-6 w-6 text-emerald-400 mr-2 -mt-1" />
-              <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400 bg-clip-text text-transparent">
+              <span className="bg-linear-to-r from-emerald-400 via-cyan-400 to-violet-400 bg-clip-text text-transparent">
                 {projectName}
               </span>
             </h1>

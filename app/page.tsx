@@ -246,7 +246,7 @@ export default function Home() {
           {/* Subtitle */}
           <p className="mx-auto max-w-2xl text-base text-slate-400 leading-relaxed sm:text-xl">
             Stop guessing who to trust. PumpMatch derives verifiable reputation from on-chain history,
-            helps you form elite squads, and unlocks trustless collaboration — from recruiting to revenue splitting.
+            helps you form elite squads, and unlocks trustless collaboration  from recruiting to revenue splitting.
           </p>
 
           {/* ── Single CTA cluster — no duplicates ───────────────────────── */}
@@ -395,14 +395,18 @@ export default function Home() {
             <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-emerald-500">
               Core Loop
             </p>
-            <h2 className="text-3xl font-black text-slate-100 sm:text-4xl lg:text-5xl">
-              Analyze →{" "}
-              <span className="bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+            <h2 className="text-2xl font-black text-slate-100 sm:text-4xl lg:text-5xl whitespace-normal">
+              <span className="inline-block">Analyze&nbsp;</span>
+              <span className="inline-block text-slate-500">&rarr;</span>
+              <span className="inline-block">&nbsp;</span>
+              <span className="inline-block bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
                 Compete
-              </span>{" "}
-              →{" "}
-              <span className="bg-linear-to-rrom-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
-                Squad Up
+              </span>
+              <span className="inline-block">&nbsp;</span>
+              <span className="inline-block text-slate-500">&rarr;</span>
+              <span className="inline-block">&nbsp;</span>
+              <span className="inline-block bg-linear-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
+                Squad&nbsp;Up
               </span>
             </h2>
             <p className="mx-auto mt-5 max-w-lg text-slate-500 text-sm leading-relaxed">
