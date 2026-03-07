@@ -89,12 +89,22 @@ export default function CommandCenterIndexPage() {
   if (!userId) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-        <div className="max-w-md w-full rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-          <h1 className="text-2xl font-black tracking-tight">Command Center</h1>
+        <div className="max-w-md w-full rounded-2xl border border-slate-800/70 bg-slate-900/40 backdrop-blur-xl shadow-2xl shadow-emerald-500/5 p-8">
+          <h1 className="text-2xl font-black tracking-tight text-slate-100">Command Center</h1>
           <p className="mt-2 text-sm text-slate-400">Connect your wallet to access your squads.</p>
-          <div className="mt-5 flex gap-3">
-            <Link href="/" className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-emerald-400 transition-colors">Go Home</Link>
-            <Link href="/arena" className="rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800/50 transition-colors">Browse Arena</Link>
+          <div className="mt-6 flex gap-3">
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-slate-950 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            >
+              Go Home
+            </Link>
+            <Link
+              href="/arena"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-700/60 bg-slate-900/30 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-900/45 hover:border-slate-600/80 transition-[background-color,border-color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            >
+              Browse Arena
+            </Link>
           </div>
         </div>
       </div>
@@ -104,43 +114,63 @@ export default function CommandCenterIndexPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+
+        {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-3xl font-black tracking-tight">My Squads</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              {walletAddress ? `Wallet: ${maskWallet(walletAddress)}` : "Wallet address not available yet."}
+            <h1 className="text-3xl font-black tracking-tight text-slate-100">My Squads</h1>
+            <p className="mt-1.5 text-sm text-slate-400 font-mono">
+              {walletAddress ? maskWallet(walletAddress) : "Wallet not connected"}
             </p>
           </div>
           <div className="flex gap-2">
-            <Link href="/arena" className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/15 transition-colors">
+            <Link
+              href="/arena"
+              className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/15 hover:border-amber-500/45 shadow-lg shadow-amber-500/10 transition-[background-color,border-color,box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            >
               <Swords className="h-4 w-4" /> Arena
             </Link>
           </div>
         </div>
 
+        {/* Pending Invites */}
         {pendingInvites.length > 0 && (
-          <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4">
-            <div className="text-sm font-semibold text-emerald-200">Pending Invites</div>
-            <div className="mt-2 space-y-2">
+          <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 backdrop-blur-xl p-4 shadow-[0_0_18px_rgba(16,185,129,0.08)]">
+            <div className="text-sm font-semibold text-emerald-200 mb-2 tabular-nums">
+              Pending Invites ({pendingInvites.length})
+            </div>
+            <div className="space-y-2">
               {pendingInvites.map((inv) => (
-                <Link key={inv.projectId} href={`/command-center/${inv.projectId}`} className="block rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:bg-slate-900/60 transition-colors">
+                <Link
+                  key={inv.projectId}
+                  href={`/command-center/${inv.projectId}`}
+                  className="block rounded-xl border border-slate-800 bg-slate-900/35 px-4 py-3 hover:bg-slate-900/55 hover:border-slate-700/80 transition-[background-color,border-color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                >
                   <div className="text-sm font-semibold text-slate-200">{inv.projectName}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">Open cockpit to accept/reject invite</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Open cockpit to accept or reject invite</div>
                 </Link>
               ))}
             </div>
           </div>
         )}
 
+        {/* Empty state / Squad list */}
         {squads.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-            <div className="flex items-start gap-3">
-              <ShieldAlert className="h-5 w-5 text-slate-400 mt-0.5" />
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/35 backdrop-blur-xl p-6 shadow-2xl shadow-slate-950/30">
+            <div className="flex items-start gap-4">
+              <div className="h-10 w-10 shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <ShieldAlert className="h-5 w-5 text-emerald-400" />
+              </div>
               <div>
                 <div className="text-sm font-semibold text-slate-200">No squads yet</div>
                 <p className="mt-1 text-sm text-slate-400">Browse the Arena to join a squad, or claim a project to create your own.</p>
-                <div className="mt-4 flex gap-3">
-                  <Link href="/arena" className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-emerald-400 transition-colors">Browse Arena</Link>
+                <div className="mt-5 flex gap-3">
+                  <Link
+                    href="/arena"
+                    className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-slate-950 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                  >
+                    Browse Arena
+                  </Link>
                 </div>
               </div>
             </div>
@@ -148,7 +178,11 @@ export default function CommandCenterIndexPage() {
         ) : (
           <div className="space-y-3">
             {squads.map((s) => (
-              <Link key={s.id} href={`/command-center/${s.id}`} className="block rounded-2xl border border-slate-800 bg-slate-900/30 p-4 hover:bg-slate-900/45 transition-colors">
+              <Link
+                key={s.id}
+                href={`/command-center/${s.id}`}
+                className="block rounded-2xl border border-slate-800 bg-slate-900/30 p-4 hover:bg-slate-900/50 hover:border-emerald-500/25 hover:shadow-[0_0_22px_rgba(16,185,129,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-300 active:scale-[0.99] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 group"
+              >
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="text-sm font-bold text-slate-100">{s.name}</div>
@@ -158,7 +192,7 @@ export default function CommandCenterIndexPage() {
                       Ops: <span className="text-emerald-300 font-semibold">{s.ops_status}</span>
                     </div>
                   </div>
-                  <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200">
+                  <div className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 group-hover:bg-emerald-500/15 group-hover:border-emerald-500/35 shadow-lg shadow-emerald-500/10 transition-[background-color,border-color] duration-200">
                     <Rocket className="h-4 w-4" /> Open Cockpit
                   </div>
                 </div>
@@ -166,6 +200,7 @@ export default function CommandCenterIndexPage() {
             ))}
           </div>
         )}
+
       </div>
     </div>
   );

@@ -157,8 +157,9 @@ export function ArenaLeaderboard({
           </p>
         </div>
 
-        {/* ── Tab Bar + Actions ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
+        {/* ── Tab Bar + Actions (sticky) ── */}
+        <div className="pm-stickybar -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex w-full sm:w-auto rounded-xl border border-slate-700/50 bg-slate-900/80 backdrop-blur-sm p-1">
             <button
               type="button"
@@ -218,6 +219,7 @@ export function ArenaLeaderboard({
               </button>
             )}
           </div>
+        </div>
         </div>
 
         {/* Sync Result Toast */}

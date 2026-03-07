@@ -86,13 +86,15 @@ function RankIcon({ rank }: { rank: number }) {
 // ──────────────────────────────────────────────────────────────
 
 function getCardStyle(rank: number): string {
+  // pm-card provides base glass + transition; pm-glow-purple provides default hover.
+  // Only return rank-specific overrides here.
   if (rank === 1)
-    return "scale-[1.02] border-yellow-400/50 bg-gradient-to-br from-yellow-500/10 to-transparent shadow-[0_0_30px_-5px_rgba(250,204,21,0.2)]";
+    return "scale-[1.02] border-yellow-400/50 bg-gradient-to-br from-yellow-500/10 to-transparent shadow-[0_0_30px_-5px_rgba(250,204,21,0.2)] hover:shadow-[0_0_36px_-5px_rgba(250,204,21,0.28)]";
   if (rank === 2)
     return "border-slate-300/40 bg-gradient-to-br from-slate-400/5 to-transparent shadow-[0_0_20px_-5px_rgba(148,163,184,0.15)]";
   if (rank === 3)
     return "border-orange-400/40 bg-gradient-to-br from-orange-500/5 to-transparent shadow-[0_0_20px_-5px_rgba(251,146,60,0.15)]";
-  return "border-slate-700/40 bg-slate-950/70 hover:border-slate-600/60 hover:bg-slate-900/70";
+  return ""; // pm-card + pm-glow-purple handle the default case
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -152,7 +154,7 @@ function PortalDropdown({ anchorRect, items, onSelect, onClose }: PortalDropdown
         exit={{ opacity: 0, y: 8, scale: 0.95 }}
         transition={{ duration: 0.15, ease: "easeOut" }}
         style={style}
-        className="rounded-xl border border-purple-500/30 bg-slate-900/95 p-2 shadow-xl backdrop-blur-md"
+        className="rounded-2xl border border-purple-500/25 bg-slate-900/95 backdrop-blur-xl p-2 shadow-2xl z-50"
       >
         <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-slate-500">
           Select Project
@@ -164,7 +166,7 @@ function PortalDropdown({ anchorRect, items, onSelect, onClose }: PortalDropdown
               onClose();
               onSelect(item.id);
             }}
-            className="w-full truncate rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-purple-500/20 hover:text-purple-300"
+            className="w-full truncate rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-300 transition-[background-color] duration-150 hover:bg-purple-500/15 hover:text-purple-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-inset"
           >
             {item.name}
           </button>
@@ -366,7 +368,7 @@ export function AgentCard({
         ease: "easeOut",
         delay: index * 0.06,
       }}
-      className={`relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 rounded-2xl border backdrop-blur-md p-3 sm:p-4 md:p-5 transition-all duration-300 ${getCardStyle(agent.rank)}`}
+      className={`pm-card pm-glow-purple relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-3 sm:p-4 md:p-5 group ${getCardStyle(agent.rank)}`}
     >
       {/* Identity row: Rank + Avatar + Info */}
       <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 border-b border-slate-800/50 pb-3 sm:border-b-0 sm:pb-0">
@@ -399,10 +401,10 @@ export function AgentCard({
 
       {/* Trust Score + Network Bonus */}
       <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-4 flex-shrink-0 sm:pl-2">
-        <div className="relative bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right overflow-hidden">
-          {/* Intel Radar ping */}
-          <div className="absolute inset-0 rounded-lg pointer-events-none sm:hidden">
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-400/5 to-transparent animate-pulse" />
+        <div className="relative bg-slate-800/50 rounded-xl px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right overflow-hidden">
+          {/* Intel Radar shimmer — only on hover, no constant pulse */}
+          <div className="absolute inset-0 rounded-xl pointer-events-none sm:hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/0 via-purple-500/10 to-purple-500/0 opacity-0 group-hover:opacity-100 transition-[opacity] duration-300" />
           </div>
           <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 sm:hidden">
             Trust Score
@@ -410,7 +412,7 @@ export function AgentCard({
           <span
             className={`text-lg sm:text-2xl font-black tabular-nums tracking-tighter leading-none ${
               displayScore >= 80
-                ? "text-emerald-300 drop-shadow-[0_0_12px_rgba(16,185,129,0.5)]"
+                ? "text-emerald-400 drop-shadow-[0_0_12px_rgba(16,185,129,0.5)]"
                 : displayScore >= 50
                   ? "text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]"
                   : "text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.3)]"
@@ -422,11 +424,11 @@ export function AgentCard({
             Trust
           </p>
         </div>
-        <div className="bg-slate-800/50 rounded-lg px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right">
+        <div className="bg-slate-800/50 rounded-xl px-3 py-2.5 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right">
           <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 sm:hidden">
             Network
           </p>
-          <p className="text-sm font-mono tabular-nums text-emerald-400 sm:text-[9px] font-bold sm:mt-0.5 animate-pulse">
+          <p className="text-sm font-mono tabular-nums text-emerald-400 sm:text-[9px] font-bold sm:mt-0.5">
             +5 Bonus
           </p>
         </div>
@@ -437,19 +439,19 @@ export function AgentCard({
             ref={recruitBtnRef}
             onClick={handleRecruitClick}
             disabled={isRecruitDisabled}
-            className={`col-span-2 sm:col-auto inline-flex items-center justify-center gap-1.5 border rounded-lg px-4 py-2 min-h-[44px] text-xs font-semibold transition-all duration-200 ${
+            className={`col-span-2 sm:col-auto inline-flex items-center justify-center gap-1.5 border rounded-xl px-4 py-2 min-h-[44px] text-xs font-semibold transition-[background-color,border-color,box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
               inviteState === "success"
-                ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
                 : inviteState === "error"
-                  ? "border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
-                  : "border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/60 hover:shadow-[0_0_15px_rgba(168,85,247,0.15)]"
+                  ? "border-rose-500/30 text-rose-400 bg-rose-500/5 hover:bg-rose-500/10"
+                  : "border-purple-500/30 text-purple-300 bg-purple-500/5 hover:bg-purple-500/10 hover:border-purple-500/55 hover:shadow-[0_0_14px_rgba(168,85,247,0.12)]"
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {recruitLabel()}
           </button>
         ) : (
           <button
-            className="col-span-2 sm:col-auto border border-purple-500/30 text-purple-400 rounded-lg px-4 py-2 min-h-[44px] text-xs font-semibold transition-all duration-200 opacity-50 cursor-not-allowed"
+            className="col-span-2 sm:col-auto border border-purple-500/30 text-purple-300 bg-purple-500/5 rounded-xl px-4 py-2 min-h-[44px] text-xs font-semibold opacity-50 cursor-not-allowed"
             disabled
             title="Claim a project to recruit agents"
           >

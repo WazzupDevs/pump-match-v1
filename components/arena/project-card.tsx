@@ -47,7 +47,7 @@ type RiskBandConfig = { color: string; icon: ReactNode; label: string };
 
 function RiskBandBadge({ band, score }: { band: string, score: number }) {
   const configs: Record<string, RiskBandConfig> = {
-    SAFE: { color: "bg-emerald-500/15 text-emerald-300 border-emerald-400/50 shadow-[0_0_18px_-2px_rgba(16,185,129,0.45)] animate-pulse", icon: <ShieldCheck className="h-3 w-3" />, label: "SAFE" },
+    SAFE: { color: "bg-emerald-500/10 text-emerald-300 border-emerald-500/25 shadow-[0_0_14px_rgba(16,185,129,0.12)]", icon: <ShieldCheck className="h-3 w-3" />, label: "SAFE" },
     LOW_RISK: { color: "bg-blue-500/10 text-blue-400 border-blue-500/30", icon: <Shield className="h-3 w-3" />, label: "LOW RISK" },
     MEDIUM: { color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30", icon: <AlertTriangle className="h-3 w-3" />, label: "MEDIUM RISK" },
     HIGH: { color: "bg-orange-500/10 text-orange-400 border-orange-500/30", icon: <AlertTriangle className="h-3 w-3" />, label: "HIGH RISK" },
@@ -58,9 +58,12 @@ function RiskBandBadge({ band, score }: { band: string, score: number }) {
   const config = configs[band] || configs.EXTREME;
 
   return (
-    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${config.color}`}>
+    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-[background-color,border-color] duration-200 ${config.color}`}>
+      {band === "SAFE" && (
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse motion-reduce:animate-none" />
+      )}
       {config.icon}
-      {config.label} {score > 0 && `(${score})`}
+      {config.label} {score > 0 && <span className="tabular-nums">({score})</span>}
     </div>
   );
 }
@@ -73,7 +76,7 @@ function TrustBreakdownPanel({ project }: { project: PowerSquadProject }) {
   const hasSquad = project.memberCount > 0;
 
   return (
-    <div className="pt-4 pb-2 px-2 mt-4 border-t border-slate-800/60 space-y-4">
+    <div className="pt-4 pb-3 px-3 mt-4 border-t border-slate-800/60 space-y-4 bg-slate-950/30 border border-slate-800/60 rounded-2xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
           <Info className="h-3.5 w-3.5 text-slate-500" /> Trust Underwriting Engine
@@ -177,12 +180,18 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
     if (isGhost && !isExiled) return "grayscale opacity-60 border-slate-800/30 bg-slate-950/30";
     if (isExiled || project.project_risk_band === "RUGGED") return "border-red-500/40 bg-gradient-to-br from-red-950/30 to-slate-950/90 shadow-[0_0_20px_-5px_rgba(239,68,68,0.2)] grayscale-[0.5]";
     
-    let style = `border-slate-700/40 bg-slate-950/70 hover:border-slate-600/60 transition-colors duration-300 ${isExpanded ? 'bg-slate-900/90 border-slate-600/80 shadow-lg' : ''}`;
-    
+    // pm-card provides base glass + transition + active:scale; pm-glow-emerald provides default hover.
+    // Only return state-specific overrides here.
+    let style = isExpanded ? "bg-slate-900/55 border-slate-700/80 shadow-2xl" : "";
+
     if (project.project_risk_band === "SAFE") {
-      style = `transition-colors duration-300 ${isExpanded ? 'border-emerald-500/60 bg-slate-900/95 shadow-[0_0_25px_-5px_rgba(16,185,129,0.25)]' : 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 to-slate-950/90 shadow-[0_0_15px_-3px_rgba(16,185,129,0.15)] hover:border-emerald-500/50'}`;
+      style = isExpanded
+        ? "border-emerald-500/50 bg-slate-900/60 shadow-[0_0_25px_-5px_rgba(16,185,129,0.22)]"
+        : "border-emerald-500/25 bg-gradient-to-br from-emerald-950/20 to-slate-950/85 shadow-[0_0_18px_-3px_rgba(16,185,129,0.14)]";
     } else if (project.project_risk_band === "LOW_RISK") {
-      style = `transition-colors duration-300 ${isExpanded ? 'border-blue-500/50 bg-slate-900/95 shadow-[0_0_20px_-5px_rgba(59,130,246,0.2)]' : 'border-blue-500/20 bg-gradient-to-br from-blue-950/10 to-slate-950/80 hover:border-blue-500/40'}`;
+      style = isExpanded
+        ? "border-blue-500/40 bg-slate-900/60 shadow-[0_0_20px_-5px_rgba(59,130,246,0.18)]"
+        : "border-blue-500/20 bg-gradient-to-br from-blue-950/10 to-slate-950/80";
     }
 
     if (rank === 1) style += ` relative z-10 scale-[1.02] bg-gradient-to-br from-yellow-500/10 to-transparent shadow-[0_0_30px_-5px_rgba(250,204,21,0.2)] ${isExpanded ? 'border-yellow-400/80' : 'border-yellow-400/50'} ${project.project_risk_band === 'SAFE' ? 'ring-1 ring-emerald-500/50' : ''}`;
@@ -197,7 +206,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: "easeOut", delay: index * 0.06 }}
-      className={`relative flex flex-col rounded-2xl border backdrop-blur-md p-3 sm:p-4 md:p-5 ${getCardBaseStyle()}`}
+      className={`pm-card pm-glow-emerald relative flex flex-col p-3 sm:p-4 md:p-5 ${getCardBaseStyle()}`}
     >
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
         {/* Identity row: Rank + Ticker + Info */}
@@ -260,7 +269,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
               }}
               aria-expanded={isExpanded}
               aria-controls={`trust-panel-${project.id}`}
-              className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full hover:bg-slate-800/80 transition-colors focus:outline-none"
+              className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full hover:bg-slate-800/70 transition-[background-color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-950"
             >
               <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
                 <ChevronDown className={`h-5 w-5 ${isExpanded ? 'text-emerald-400' : 'text-slate-500'}`} />
@@ -285,15 +294,15 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
             <div className="pt-4 mt-2 border-t border-slate-800/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-slate-500" />
-                <span className="text-xs text-slate-400">{project.memberCount} Squad Members</span>
+                <span className="text-xs text-slate-400 tabular-nums"><span className="tabular-nums">{project.memberCount}</span> Squad Members</span>
               </div>
-              
+
               <Link
                 href={`/command-center/${project.id}`}
-                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-lg font-semibold transition-colors duration-200 ${
+                className={`text-xs px-4 py-2 min-h-[44px] inline-flex items-center rounded-xl font-semibold transition-[background-color,border-color,box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
                   isUserFounder
-                    ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/20 hover:border-indigo-400/60 hover:shadow-[0_0_18px_rgba(99,102,241,0.25)]"
-                    : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/20 hover:border-emerald-400/60 hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                    ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/25 hover:bg-indigo-500/15 hover:border-indigo-500/40 hover:shadow-[0_0_16px_rgba(99,102,241,0.14)] focus-visible:ring-indigo-400"
+                    : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 hover:bg-emerald-500/15 hover:border-emerald-500/40 hover:shadow-[0_0_16px_rgba(16,185,129,0.14)] focus-visible:ring-emerald-400"
                 }`}
                 onClick={(e) => e.stopPropagation()}
               >

@@ -35,3 +35,69 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Tailwind v4: @utility replaces @layer components for custom classes ── */
+
+@utility pm-surface {
+  @apply bg-slate-900/35 backdrop-blur-xl border border-slate-800/70 rounded-2xl;
+}
+
+@utility pm-card {
+  @apply bg-slate-900/35 backdrop-blur-xl border border-slate-800/70 rounded-2xl;
+  transition-property: background-color, border-color, box-shadow, transform;
+  transition-duration: 300ms;
+
+  &:active {
+    transform: scale(0.99);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+    &:active {
+      transform: none;
+    }
+  }
+}
+
+@utility pm-stickybar {
+  @apply sticky top-0 z-40 bg-slate-950/70 backdrop-blur-xl border-b border-slate-800/70;
+}
+
+@utility pm-searchWrap {
+  @apply rounded-2xl border border-slate-800/70 bg-slate-900/35 backdrop-blur-xl;
+  transition-property: border-color, box-shadow;
+  transition-duration: 200ms;
+
+  &:focus-within {
+    border-color: rgba(34, 211, 238, 0.35);
+    box-shadow: 0 0 18px rgba(34, 211, 238, 0.12);
+  }
+}
+
+@utility pm-searchInput {
+  @apply w-full bg-transparent px-4 py-2 text-sm text-slate-200 placeholder:text-slate-600 outline-none;
+}
+
+@utility pm-glow-emerald {
+  &:hover {
+    border-color: rgba(16, 185, 129, 0.25);
+    background-color: rgba(15, 23, 42, 0.50);
+    box-shadow: 0 0 22px rgba(16, 185, 129, 0.10);
+  }
+}
+
+@utility pm-glow-purple {
+  &:hover {
+    border-color: rgba(168, 85, 247, 0.25);
+    background-color: rgba(15, 23, 42, 0.50);
+    box-shadow: 0 0 22px rgba(168, 85, 247, 0.10);
+  }
+}
+
+@utility pm-glow-amber {
+  &:hover {
+    border-color: rgba(245, 158, 11, 0.25);
+    background-color: rgba(15, 23, 42, 0.50);
+    box-shadow: 0 0 22px rgba(245, 158, 11, 0.10);
+  }
+}

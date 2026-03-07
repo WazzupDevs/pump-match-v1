@@ -183,17 +183,22 @@ function OpsProgressBar({ status }: { status: OpsStatusValue }) {
           return (
             <div key={step.key} className="flex items-center flex-1">
               <div className="flex flex-col items-center flex-1 min-w-0">
-                <div
-                  className={`w-full h-1.5 rounded-full transition-[width,background-color] ${
-                    isCompleted
-                      ? "bg-emerald-500"
-                      : isActive
-                        ? "bg-emerald-500/60 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
-                        : "bg-slate-800"
-                  }`}
-                />
+                <div className="relative w-full">
+                  <div
+                    className={`w-full h-1.5 rounded-full transition-[background-color,box-shadow] duration-500 ${
+                      isCompleted
+                        ? "bg-emerald-500"
+                        : isActive
+                          ? "bg-emerald-500/60 shadow-[0_0_14px_rgba(16,185,129,0.18)] ring-1 ring-emerald-500/20"
+                          : "bg-slate-800"
+                    }`}
+                  />
+                  {isActive && (
+                    <span className="absolute -top-0.5 right-0 w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.7)] animate-pulse motion-reduce:animate-none" />
+                  )}
+                </div>
                 <span
-                  className={`mt-1.5 text-[9px] font-semibold uppercase tracking-wider truncate ${
+                  className={`mt-1.5 text-[9px] font-semibold uppercase tracking-wider truncate transition-[color] duration-300 ${
                     isActive ? "text-emerald-400" : isCompleted ? "text-slate-400" : "text-slate-600"
                   }`}
                 >
@@ -202,7 +207,7 @@ function OpsProgressBar({ status }: { status: OpsStatusValue }) {
               </div>
               {i < OPS_STEPS.length - 1 && (
                 <ChevronRight
-                  className={`h-3 w-3 shrink-0 mx-0.5 ${
+                  className={`h-3 w-3 shrink-0 mx-0.5 transition-[color] duration-300 ${
                     isCompleted ? "text-emerald-500" : "text-slate-700"
                   }`}
                 />
@@ -211,7 +216,7 @@ function OpsProgressBar({ status }: { status: OpsStatusValue }) {
           );
         })}
       </div>
-      <p className="text-[10px] text-slate-500 italic">{hints[status]}</p>
+      <p className="text-[10px] text-slate-500 italic tracking-wide">{hints[status]}</p>
     </div>
   );
 }
@@ -422,13 +427,13 @@ export function SquadCommandCenter({
       <>
         {/* Guest Apply Panel */}
         {connected && canSign && isGuest && (
-          <div className="p-4 border-b border-slate-800 bg-slate-950/40">
+          <div className="p-5 border-b border-slate-800/50 bg-slate-950/30">
             <div className="flex items-center gap-2 text-sm font-semibold text-emerald-200">
-              <Rocket className="w-4 h-4" />
+              <Rocket className="w-4 h-4 text-emerald-400" />
               Apply to Squad
             </div>
-            <div className="mt-2">
-              <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-medium">
+            <div className="mt-3">
+              <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-medium mb-1">
                 Desired Role
               </label>
               <input
@@ -436,14 +441,14 @@ export function SquadCommandCenter({
                 onChange={(e) => setRoleInput(e.target.value)}
                 placeholder="Developer, Marketing, Advisor\u2026"
                 maxLength={32}
-                className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-colors"
+                className="w-full rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-900 transition-[border-color] duration-200"
               />
             </div>
             <button
               type="button"
               disabled={isBusy || !sanitizeRole(roleInput).ok}
               onClick={() => void handleApply()}
-              className="mt-3 w-full rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 hover:shadow-[0_0_15px_rgba(16,185,129,0.2)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="mt-3 w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold px-4 py-2.5 text-xs shadow-lg shadow-emerald-500/15 hover:from-emerald-400 hover:to-teal-400 active:scale-95 motion-reduce:active:scale-100 transition-[box-shadow,transform] duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
             >
               {processingKey?.startsWith("apply:") ? (
                 <><Loader2 className="w-4 h-4 animate-spin" /> Signing...</>
@@ -459,18 +464,18 @@ export function SquadCommandCenter({
 
         {/* Pending Application Radar */}
         {connected && canSign && isPendingApplication && (
-          <div className="p-4 border-b border-slate-800 bg-slate-950/40">
-            <div className="relative overflow-hidden rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
-              <div className="absolute inset-0 opacity-40 pointer-events-none">
-                <div className="absolute left-1/2 top-1/2 h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full border border-purple-500/20 animate-pulse" />
+          <div className="p-5 border-b border-slate-800/50 bg-slate-950/30">
+            <div className="relative overflow-hidden rounded-2xl border border-purple-500/20 bg-purple-500/5 backdrop-blur-sm p-4">
+              <div className="absolute inset-0 opacity-30 pointer-events-none">
+                <div className="absolute left-1/2 top-1/2 h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full border border-purple-500/20 animate-pulse motion-reduce:animate-none" />
               </div>
               <div className="relative">
                 <div className="text-sm font-semibold text-purple-200">Application Under Review</div>
-                <div className="mt-1 text-xs text-slate-300">
+                <div className="mt-1 text-xs text-slate-400">
                   Your application is being reviewed by the Founder.
                 </div>
                 {myMember?.role && (
-                  <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 px-3 py-1 text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                  <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 px-3 py-1 text-[10px] font-bold text-purple-300 uppercase tracking-wider shadow-[0_0_12px_rgba(168,85,247,0.1)]">
                     <Clock className="w-3 h-3" /> Applied as: {myMember.role}
                   </span>
                 )}
@@ -485,7 +490,7 @@ export function SquadCommandCenter({
             Active Squad ({activeMembers.length})
           </h3>
           {activeMembers.length === 0 ? (
-            <div className="text-center py-6 text-slate-500 text-sm">No active members yet.</div>
+            <div className="text-center py-8 text-slate-600 text-sm">No active members yet.</div>
           ) : (
             activeMembers.map((member) => {
               const w = getMemberWallet(member);
@@ -495,10 +500,10 @@ export function SquadCommandCenter({
               return (
                 <div
                   key={member.id}
-                  className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800/60 transition-colors"
+                  className="flex items-center justify-between p-3 bg-slate-900/35 backdrop-blur-md border border-slate-800/60 rounded-2xl hover:bg-slate-900/55 hover:border-slate-700/80 transition-[background-color,border-color] duration-300"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shadow-[0_0_10px_rgba(16,185,129,0.08)]">
                       <Users className="w-5 h-5 text-emerald-400" />
                     </div>
                     <div>
@@ -514,9 +519,9 @@ export function SquadCommandCenter({
                         type="button"
                         onClick={() => void handleTransition(w, "kick", member.id)}
                         disabled={isBusy || !canSign}
-                        className={`p-2 rounded-lg transition-colors ${
+                        className={`p-2 rounded-xl transition-[background-color,color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 ${
                           processingKey === kickKey
-                            ? "text-rose-400"
+                            ? "text-rose-400 bg-rose-500/10"
                             : "text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"
                         } disabled:opacity-50`}
                         aria-label="Kick member"
@@ -533,10 +538,10 @@ export function SquadCommandCenter({
                         type="button"
                         onClick={() => void handleTransition(w, "leave", member.id)}
                         disabled={isBusy || !canSign}
-                        className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                        className={`px-3 py-1.5 text-xs border rounded-xl transition-[background-color,border-color] duration-200 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 ${
                           processingKey === leaveKey
-                            ? "text-slate-400 border-slate-600 cursor-not-allowed"
-                            : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+                            ? "text-slate-400 border-slate-700/50 cursor-not-allowed"
+                            : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:border-rose-500/50"
                         } disabled:opacity-50`}
                       >
                         {processingKey === leaveKey ? (
@@ -580,10 +585,10 @@ export function SquadCommandCenter({
                 return (
                   <div
                     key={member.id}
-                    className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-amber-500/20 hover:border-amber-500/40 transition-colors"
+                    className="flex items-center justify-between p-3 bg-slate-900/35 backdrop-blur-md border border-amber-500/20 rounded-2xl hover:border-amber-500/40 hover:bg-slate-900/50 transition-[background-color,border-color] duration-300"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shadow-[0_0_10px_rgba(245,158,11,0.08)]">
                         <Clock className="w-5 h-5 text-amber-400" />
                       </div>
                       <div>
@@ -609,7 +614,7 @@ export function SquadCommandCenter({
                             onClick={() => void handleTransition(w, "reject_app", member.id)}
                             disabled={isBusy || !canSign}
                             aria-label="Reject application"
-                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors disabled:opacity-50"
+                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-[background-color,color] duration-200 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50"
                           >
                             {processingKey === rejectAppKey ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <XCircle className="w-4 h-4" aria-hidden="true" />}
                           </button>
@@ -617,10 +622,10 @@ export function SquadCommandCenter({
                             type="button"
                             onClick={() => void handleTransition(w, "approve_app", member.id)}
                             disabled={isBusy || !canSign}
-                            className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                            className={`px-3 py-1.5 text-xs border rounded-xl transition-[background-color,border-color] duration-200 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 ${
                               processingKey === approveAppKey
-                                ? "text-slate-400 border-slate-600 cursor-not-allowed"
-                                : "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                                ? "text-slate-400 border-slate-700/50 cursor-not-allowed"
+                                : "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:border-emerald-500/50"
                             } disabled:opacity-50`}
                           >
                             {processingKey === approveAppKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}{" "}
@@ -633,10 +638,10 @@ export function SquadCommandCenter({
                           type="button"
                           onClick={() => void handleTransition(w, "revoke_invite", member.id)}
                           disabled={isBusy || !canSign}
-                          className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                          className={`px-3 py-1.5 text-xs border rounded-xl transition-[background-color,border-color] duration-200 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 ${
                             processingKey === revokeKey
-                              ? "text-slate-400 border-slate-600 cursor-not-allowed"
-                              : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+                              ? "text-slate-400 border-slate-700/50 cursor-not-allowed"
+                              : "text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:border-rose-500/50"
                           } disabled:opacity-50`}
                         >
                           {processingKey === revokeKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}{" "}
@@ -650,7 +655,7 @@ export function SquadCommandCenter({
                             onClick={() => void handleTransition(w, "reject_invite", member.id)}
                             disabled={isBusy || !canSign}
                             aria-label="Reject invite"
-                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors disabled:opacity-50"
+                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-[background-color,color] duration-200 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50"
                           >
                             {processingKey === rejectInvKey ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <XCircle className="w-4 h-4" aria-hidden="true" />}
                           </button>
@@ -658,10 +663,10 @@ export function SquadCommandCenter({
                             type="button"
                             onClick={() => void handleTransition(w, "accept_invite", member.id)}
                             disabled={isBusy || !canSign}
-                            className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                            className={`px-3 py-1.5 text-xs border rounded-xl transition-[background-color,border-color] duration-200 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 ${
                               processingKey === acceptInvKey
-                                ? "text-slate-400 border-slate-600 cursor-not-allowed"
-                                : "text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
+                                ? "text-slate-400 border-slate-700/50 cursor-not-allowed"
+                                : "text-blue-400 border-blue-500/30 hover:bg-blue-500/10 hover:border-blue-500/50"
                             } disabled:opacity-50`}
                           >
                             {processingKey === acceptInvKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}{" "}
@@ -740,7 +745,7 @@ export function SquadCommandCenter({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+              className="text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-[color] duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/50 rounded"
             >
               <PenLine className="w-3 h-3" /> Edit Slots
             </button>
@@ -748,7 +753,7 @@ export function SquadCommandCenter({
         </div>
 
         {slotError && (
-          <div className="mb-3 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-xs flex items-center gap-2">
+          <div className="mb-3 p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs flex items-center gap-2 backdrop-blur-sm">
             <ShieldAlert className="w-3.5 h-3.5 shrink-0" /> {slotError}
           </div>
         )}
@@ -756,15 +761,15 @@ export function SquadCommandCenter({
         {!editing ? (
           <div className="space-y-2">
             {roleSlots.length === 0 ? (
-              <div className="text-center py-6 text-slate-600 text-sm">
+              <div className="text-center py-8 text-slate-600 text-sm">
                 {isFounder ? "No slots defined. Click Edit to configure roles." : "No role slots configured yet."}
               </div>
             ) : (
               roleSlots.map((slot) => (
-                <div key={slot.id} className="flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-indigo-500/20">
+                <div key={slot.id} className="group flex items-center justify-between p-3 bg-slate-900/35 backdrop-blur-md border border-slate-800/60 rounded-2xl hover:bg-slate-900/50 hover:border-emerald-500/30 hover:shadow-[0_0_18px_rgba(16,185,129,0.14)] transition-[background-color,border-color,box-shadow] duration-300 motion-reduce:transition-none">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-                      <Settings2 className="w-4 h-4 text-indigo-400" />
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+                      <Settings2 className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 group-hover:scale-110 transition-[color,transform] duration-300 motion-reduce:transform-none" />
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-slate-200">{slot.role_type}</p>
@@ -780,7 +785,7 @@ export function SquadCommandCenter({
         ) : (
           <div className="space-y-3">
             {draft.map((slot, idx) => (
-              <div key={idx} className="flex items-center gap-2 p-3 bg-slate-800/40 rounded-xl border border-slate-700/50">
+              <div key={idx} className="flex items-center gap-2 p-3 bg-slate-900/35 backdrop-blur-md border border-slate-700/50 rounded-2xl">
                 <select
                   value={slot.role_type}
                   aria-label={`Role type for slot ${idx + 1}`}
@@ -789,7 +794,7 @@ export function SquadCommandCenter({
                     next[idx] = { ...next[idx], role_type: e.target.value };
                     setDraft(next);
                   }}
-                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+                  className="flex-1 rounded-xl border border-slate-700/60 bg-slate-900/50 px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/50 transition-[border-color] duration-200"
                 >
                   <option value="">Select role\u2026</option>
                   {DEFAULT_ROLE_OPTIONS.map((r) => (
@@ -806,7 +811,7 @@ export function SquadCommandCenter({
                     next[idx] = { ...next[idx], capacity: Math.max(1, parseInt(e.target.value) || 1) };
                     setDraft(next);
                   }}
-                  className="w-16 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-xs text-slate-200 text-center focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+                  className="w-16 rounded-xl border border-slate-700/60 bg-slate-900/50 px-2 py-1.5 text-xs text-slate-200 text-center focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/50 transition-[border-color] duration-200"
                   aria-label={`Capacity for slot ${idx + 1}`}
                 />
                 <input
@@ -819,13 +824,13 @@ export function SquadCommandCenter({
                     next[idx] = { ...next[idx], min_trust: Math.max(0, parseInt(e.target.value) || 0) };
                     setDraft(next);
                   }}
-                  className="w-16 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-xs text-slate-200 text-center focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+                  className="w-16 rounded-xl border border-slate-700/60 bg-slate-900/50 px-2 py-1.5 text-xs text-slate-200 text-center focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/50 transition-[border-color] duration-200"
                   aria-label={`Minimum trust score for slot ${idx + 1}`}
                 />
                 <button
                   type="button"
                   onClick={() => handleRemoveSlot(idx)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
+                  className="p-1.5 text-slate-500 hover:text-rose-400 transition-[color] duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-400/50 rounded-lg"
                 >
                   <XCircle className="w-4 h-4" />
                 </button>
@@ -836,7 +841,7 @@ export function SquadCommandCenter({
               type="button"
               onClick={handleAddSlot}
               disabled={draft.length >= 10}
-              className="w-full py-2 text-xs text-indigo-400 border border-dashed border-indigo-500/30 rounded-xl hover:bg-indigo-500/5 transition-colors disabled:opacity-40"
+              className="w-full py-2 text-xs text-indigo-400 border border-dashed border-indigo-500/30 rounded-xl hover:bg-indigo-500/5 hover:border-indigo-500/50 transition-[background-color,border-color] duration-200 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/50"
             >
               + Add Slot
             </button>
@@ -846,7 +851,7 @@ export function SquadCommandCenter({
                 type="button"
                 onClick={() => void handleSaveSlots()}
                 disabled={isBusy || draft.length === 0 || draft.some((s) => !s.role_type)}
-                className="flex-1 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-xs font-bold hover:bg-indigo-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-xs font-bold hover:from-indigo-400 hover:to-violet-400 active:scale-95 motion-reduce:active:scale-100 shadow-lg shadow-indigo-500/15 transition-[box-shadow,transform] duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
               >
                 {processingKey === "save_slots" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                 Save Slots
@@ -854,7 +859,7 @@ export function SquadCommandCenter({
               <button
                 type="button"
                 onClick={() => setEditing(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-700/50 bg-slate-800/30 text-slate-400 text-xs font-bold hover:border-slate-600 transition-colors"
+                className="flex-1 py-2.5 rounded-xl border border-slate-700/60 bg-slate-900/30 text-slate-400 text-xs font-bold hover:bg-slate-900/45 hover:border-slate-600/80 transition-[background-color,border-color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
               >
                 Cancel
               </button>
@@ -962,7 +967,7 @@ export function SquadCommandCenter({
     return (
       <div className="p-4">
         {splitError && (
-          <div className="mb-3 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-xs flex items-center gap-2">
+          <div className="mb-3 p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs flex items-center gap-2 backdrop-blur-sm">
             <ShieldAlert className="w-3.5 h-3.5 shrink-0" /> {splitError}
           </div>
         )}
@@ -990,25 +995,27 @@ export function SquadCommandCenter({
               const pct = (share.bps / 100).toFixed(1);
               const signed = signedUserIds.includes(share.user_id);
               return (
-                <div key={share.user_id} className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/50">
+                <div key={share.user_id} className="group relative overflow-hidden p-3 bg-slate-900/35 backdrop-blur-md rounded-2xl border border-slate-700/50 hover:bg-slate-900/45 transition-[background-color] duration-200">
+                  <div className="absolute left-0 top-0 h-full w-[2px] bg-emerald-500/0 group-hover:bg-emerald-500/60 transition-[background-color] duration-200" />
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-mono text-slate-300">{maskWallet(share.wallet)}</span>
                       {signed ? (
-                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                        <span className="text-[9px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-[0_0_12px_rgba(16,185,129,0.12)]">
                           <CheckCircle2 className="w-2.5 h-2.5" /> Signed
                         </span>
                       ) : (
-                        <span className="text-[9px] font-bold text-slate-500 bg-slate-700/30 border border-slate-600/30 px-1.5 py-0.5 rounded-full">
+                        <span className="text-[9px] font-bold text-slate-500 bg-slate-700/30 border border-slate-600/30 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500/70 animate-pulse motion-reduce:animate-none" />
                           Pending
                         </span>
                       )}
                     </div>
-                    <span className="text-xs font-bold text-slate-200">{pct}%</span>
+                    <span className="text-xs font-bold text-slate-200 tabular-nums">{pct}%</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                  <div className="h-1.5 rounded-full bg-slate-800/80 overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-[width,background-color] ${signed ? "bg-emerald-500" : "bg-slate-600"}`}
+                      className={`h-full rounded-full transition-[width,background-color] duration-500 ${signed ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "bg-slate-600"}`}
                       style={{ width: `${share.bps / 100}%` }}
                     />
                   </div>
@@ -1016,7 +1023,7 @@ export function SquadCommandCenter({
               );
             })}
 
-            <div className="text-[10px] text-slate-500 text-center mt-2">
+            <div className="text-[10px] text-slate-500 text-center mt-2 tabular-nums">
               {signedUserIds.length} / {proposal.shares.length} signatures collected
             </div>
 
@@ -1026,7 +1033,7 @@ export function SquadCommandCenter({
                 type="button"
                 onClick={() => void handleSignProposal()}
                 disabled={isBusy}
-                className="w-full mt-3 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 hover:shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full mt-3 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-xs font-bold hover:from-emerald-400 hover:to-teal-400 active:scale-95 motion-reduce:active:scale-100 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
               >
                 {processingKey === "sign_split" ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Signing...</>
@@ -1037,8 +1044,8 @@ export function SquadCommandCenter({
             )}
 
             {isProposalLocked && (
-              <div className="mt-3 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-center">
-                <Lock className="w-5 h-5 text-emerald-400 mx-auto mb-1" />
+              <div className="mt-3 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl text-center backdrop-blur-sm shadow-[0_0_20px_rgba(16,185,129,0.06)]">
+                <Lock className="w-5 h-5 text-emerald-400 mx-auto mb-1.5" />
                 <p className="text-xs font-semibold text-emerald-300">Split Locked</p>
                 <p className="text-[10px] text-slate-500 mt-1">All signatures collected. Squad is ready for launch.</p>
               </div>
@@ -1050,12 +1057,12 @@ export function SquadCommandCenter({
             <h3 className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mb-2">
               Configure Revenue Split
             </h3>
-            <p className="text-[10px] text-slate-600 mb-3">
+            <p className="text-[10px] text-slate-500 mb-3">
               Allocate BPS (basis points) to each active member. Total must equal 10,000 (100%).
             </p>
 
             {activeMembers.length === 0 ? (
-              <div className="text-center py-6 text-slate-600 text-sm">
+              <div className="text-center py-8 text-slate-600 text-sm">
                 Add members before creating a split proposal.
               </div>
             ) : (
@@ -1064,7 +1071,7 @@ export function SquadCommandCenter({
                   const member = activeMembers[idx];
                   const w = member ? getMemberWallet(member) : share.wallet;
                   return (
-                    <div key={idx} className="flex items-center gap-3 p-3 bg-slate-800/40 rounded-xl border border-slate-700/50">
+                    <div key={idx} className="flex items-center gap-3 p-3 bg-slate-900/35 backdrop-blur-md border border-slate-700/50 rounded-2xl">
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-mono text-slate-300 truncate">{maskWallet(w)}</p>
                         <p className="text-[10px] text-slate-500">{member?.role ?? "Member"}</p>
@@ -1081,7 +1088,7 @@ export function SquadCommandCenter({
                             next[idx] = { ...next[idx], bps: Math.max(0, parseInt(e.target.value) || 0) };
                             setDraftShares(next);
                           }}
-                          className="w-20 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-xs text-slate-200 text-right focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                          className="w-20 rounded-xl border border-slate-700/60 bg-slate-900/50 px-2 py-1.5 text-xs text-slate-200 text-right focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/50 transition-[border-color] duration-200"
                         />
                         <span className="text-[10px] text-slate-500">BPS</span>
                       </div>
@@ -1089,7 +1096,7 @@ export function SquadCommandCenter({
                   );
                 })}
 
-                <div className={`flex items-center justify-between px-3 py-2 rounded-xl border ${bpsValid ? "border-emerald-500/30 bg-emerald-500/5" : "border-rose-500/30 bg-rose-500/5"}`}>
+                <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border backdrop-blur-sm ${bpsValid ? "border-emerald-500/30 bg-emerald-500/5 shadow-[0_0_12px_rgba(16,185,129,0.06)]" : "border-rose-500/30 bg-rose-500/5"}`}>
                   <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400">Total</span>
                   <span className={`text-sm font-bold tabular-nums ${bpsValid ? "text-emerald-400" : "text-rose-400"}`}>
                     {totalBps.toLocaleString()} / 10,000
@@ -1100,7 +1107,7 @@ export function SquadCommandCenter({
                   type="button"
                   onClick={() => void handleCreateProposal()}
                   disabled={isBusy || !bpsValid || draftShares.length === 0}
-                  className="w-full mt-2 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="w-full mt-2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-xs font-bold hover:from-emerald-400 hover:to-teal-400 active:scale-95 motion-reduce:active:scale-100 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                 >
                   {processingKey === "create_split" ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</>
@@ -1112,7 +1119,7 @@ export function SquadCommandCenter({
             )}
           </div>
         ) : (
-          <div className="text-center py-8 text-slate-600 text-sm">
+          <div className="text-center py-10 text-slate-600 text-sm">
             No active split proposal. The squad leader will create one.
           </div>
         )}
@@ -1131,29 +1138,29 @@ export function SquadCommandCenter({
   ];
 
   return (
-    <div className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+    <div className="w-full bg-slate-900/40 backdrop-blur-xl border border-slate-800/70 rounded-2xl overflow-hidden shadow-2xl shadow-emerald-500/5">
       {/* Wallet gating */}
       {!connected || !actorWallet ? (
-        <div className="p-4 text-sm text-slate-300">
+        <div className="p-4 text-sm text-slate-400 bg-slate-950/30">
           Connect your wallet to access the Command Center.
         </div>
       ) : null}
 
       {connected && actorWallet && !canSign ? (
-        <div className="p-4 text-sm text-slate-300">
+        <div className="p-4 text-sm text-slate-400 bg-slate-950/30">
           Your wallet does not support message signing. Actions are disabled.
         </div>
       ) : null}
 
       {/* Progress Bar */}
       {connected && actorWallet && (
-        <div className="px-4 pt-4">
+        <div className="px-4 pt-5">
           <OpsProgressBar status={opsStatus} />
         </div>
       )}
 
       {/* Tab Bar */}
-      <div role="tablist" aria-label="Squad management" className="flex items-center border-b border-slate-800 bg-slate-900/80 px-4 pt-2 gap-4">
+      <div role="tablist" aria-label="Squad management" className="flex items-center border-b border-slate-800/70 bg-slate-950/60 backdrop-blur-sm px-4 pt-2 gap-4">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -1162,20 +1169,20 @@ export function SquadCommandCenter({
             aria-selected={activeTab === tab.key}
             aria-controls={`tabpanel-${tab.key}`}
             onClick={() => setActiveTab(tab.key)}
-            className={`pb-3 text-sm font-medium transition-colors relative ${
+            className={`pb-3 text-sm font-medium transition-[color] duration-200 relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-950 rounded-t ${
               activeTab === tab.key ? "text-emerald-400" : "text-slate-500 hover:text-slate-300"
             }`}
           >
             <span className="flex items-center gap-2">
               {tab.icon} {tab.label}
               {tab.count !== undefined && tab.count > 0 && (
-                <span className="bg-slate-700/50 text-slate-400 text-[10px] px-1.5 py-0.5 rounded-full tabular-nums">
+                <span className="bg-slate-800/80 text-slate-400 text-[10px] px-1.5 py-0.5 rounded-full tabular-nums border border-slate-700/50">
                   {tab.count}
                 </span>
               )}
             </span>
             {activeTab === tab.key && (
-              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-emerald-500 rounded-t-full shadow-[0_-2px_8px_rgba(16,185,129,0.5)]" />
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-emerald-500 rounded-t-full shadow-[0_-2px_10px_rgba(16,185,129,0.55)]" />
             )}
           </button>
         ))}
@@ -1183,7 +1190,7 @@ export function SquadCommandCenter({
 
       {/* Error Banner */}
       {errorMsg && (
-        <div className="mx-4 mt-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-2 text-rose-400 text-xs break-words" role="alert">
+        <div className="mx-4 mt-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl backdrop-blur-sm flex items-center gap-2 text-rose-400 text-xs break-words" role="alert">
           <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" /> {errorMsg}
         </div>
       )}
