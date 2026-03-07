@@ -6,8 +6,9 @@ import {
   BookOpen,
   ShieldCheck,
   Crosshair,
-  Coins,
+  Map,
   ArrowLeft,
+  Brain,
 } from "lucide-react";
 
 type NavItem = {
@@ -25,10 +26,16 @@ const NAV_ITEMS: NavItem[] = [
     group: "Getting Started",
   },
   {
+    key: "intelligence-core-v2",
+    label: "Intelligence Core v2",
+    icon: <Brain className="h-4 w-4" />,
+    group: "Specifications",
+  },
+  {
     key: "trust",
-    label: "Trust Engine",
+    label: "Trust Engine (Legacy)",
     icon: <ShieldCheck className="h-4 w-4" />,
-    group: "Core Infrastructure",
+    group: "Legacy",
   },
   {
     key: "squad-os",
@@ -38,8 +45,8 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     key: "roadmap",
-    label: "Master Roadmap",
-    icon: <Coins className="h-4 w-4" />,
+    label: "Grand Vision & Roadmap",
+    icon: <Map className="h-4 w-4" />,
     group: "Vision",
   },
 ];
@@ -69,7 +76,7 @@ export function DocsSidebar() {
         className="flex items-center gap-2.5 mb-8 group"
       >
         <Logo className="h-7 w-7" />
-        <span className="text-sm font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-purple-400 bg-clip-text text-transparent">
+        <span className="text-sm font-bold tracking-tight bg-linear-to-r from-emerald-400 to-purple-400 bg-clip-text text-transparent">
           PUMP MATCH
         </span>
       </button>
@@ -125,9 +132,9 @@ export function DocsSidebar() {
       {/* Footer */}
       <div className="mt-auto pt-6 border-t border-slate-800/60">
         <p className="text-[10px] text-slate-600 leading-relaxed">
-          Pump Match v1.0
+          Pump Match v2.0
           <br />
-          The Trust Layer for Solana
+          Intelligence Core · Solana
         </p>
       </div>
     </aside>
@@ -152,7 +159,7 @@ export function DocsMobileNav() {
           className="flex items-center gap-2"
         >
           <Logo className="h-6 w-6" />
-          <span className="text-xs font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-purple-400 bg-clip-text text-transparent">
+          <span className="text-xs font-bold tracking-tight bg-linear-to-r from-emerald-400 to-purple-400 bg-clip-text text-transparent">
             PUMP MATCH
           </span>
         </button>
@@ -169,7 +176,7 @@ export function DocsMobileNav() {
               onClick={() =>
                 router.push(`/docs?tab=${item.key}`, { scroll: false })
               }
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                 isActive
                   ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
                   : "text-slate-500 hover:text-slate-300 border border-transparent"

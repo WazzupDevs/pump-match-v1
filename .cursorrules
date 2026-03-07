@@ -1,40 +1,203 @@
-# GHOSTFACE PROTOCOL - MASTER RULES
+# PumpMatch — MASTER RULES (INTELLIGENCE CORE + VIRAL RECEIPTS + FUTURE SQUAD OS)
 
-# 1. PRODUCT VISION & PHILOSOPHY
-- **Identity:** This is a Reputation & Identity Layer for Solana. NOT a trading bot.
-- **Goal:** "The Credit Score of Solana". Transform raw data into "Insights" (e.g., "Balance: 10 SOL" -> "Balance: 10 SOL (Whale Status 🐋)").
-- **Protocol Logic:** Focus on Security, Deterministic Math, and Anti-Sybil mechanisms.
-- **Privacy First:** Explicit Opt-in required for database entry (Active Wallet Registry).
+## 1) PRODUCT IDENTITY
+PumpMatch is the Behavioral Intelligence & Reputation Layer for Solana.
+It produces explainable, versioned behavioral signals for wallets and communities, and later uses those signals to power trust, squad formation, and governance.
 
-# 2. TECH STACK (STRICT)
-- **Framework:** Next.js 14 (App Router).
-- **UI:** Tailwind CSS + Shadcn UI (Custom dark mode: "Ghostface" / Cyber-Security Aesthetic).
-- **Data:** Helius DAS API (Read-Only focus). Use `lib/helius.ts`.
-- **Visualization:** Recharts.
+Strategic order:
+1. Intelligence
+2. Reputation
+3. Coordination
 
-# 3. ARCHITECTURE CONSTRAINTS (CRITICAL)
-- **Source of Truth:** Server-side ONLY. Never calculate trust scores on the client.
-- **Client Role:** Client is a "Dumb Renderer". It only displays data received from Server Actions.
-- **Database Pattern:** Use `lib/db.ts` (Mock In-Memory) for MVP. Do NOT install external DBs (Supabase/Postgres) yet.
-- **Trading Ban:** Do NOT implement swap forms, bonding curves, or AMM math.
+Hard rule:
+- Core product decisions must preserve this sequence.
+- Squad mechanics must never distort the core intelligence architecture.
 
-# 4. GHOSTFACE MATH & LOGIC
-- **Weak Link Formula:** When matching, the lowest trust score pulls the average down.
-- **Math Caps:**
-  - Badge Bonus CAP: +25
-  - Context Bonus CAP: +20
-  - Global CAP: 98 (Intentionally not 100).
-- **Social Decay:** Always apply `[1, 0.6, 0.3]` decay to social badges to prevent Sybil attacks.
-- **Badge Separation:** Strictly maintain "SYSTEM" vs "SOCIAL" badge categories.
+Viral loop core artifact:
+- Wallet Intelligence Receipt (masked, shareable, OG-image enabled)
 
-# 5. CODING BEHAVIOR
-- **Hydration Safety:** Always use `"use client"` for UI components dependent on browser APIs.
-- **Error Handling:** If Helius API fails, handle gracefully. Do not break the UI.
-- **Self-Correction:** If you generate code that causes linter errors, fix them autonomously without asking.
-- **Types:** Use `UserIntent` enums strictly. No magic strings.
+Hard rule:
+- Analysis may be required for high-trust or squad-critical actions (apply, recruit, create, invite, approve, split-sign), but basic browsing and passive discovery must remain lightweight unless explicitly restricted.
 
-# 6. FILE STRUCTURE CONTEXT
-- `app/page.tsx`: Main Dashboard, State Orchestration & Search Logic.
-- `app/actions/analyzeWallet.ts`: The Brain. All logic/calculations happen here.
-- `lib/match-engine.ts`: The Heart. Math formulas and Matrix logic.
-- `lib/db.ts`: The Memory. Mock Database for Opt-in users.
+Soft rule:
+- Posting to X is OPTIONAL.
+- X sharing may affect optional visibility or discoverability surfaces only.
+- X sharing must never directly alter or inflate core behavioral scores, confidence, or suspiciousness outputs.
+
+## 2) INTELLIGENCE CORE DESIGN LAW (DO NOT BREAK)
+Hierarchy of truth:
+1. Raw events are truth.
+2. Features are measurements.
+3. Scores are interpretations.
+4. Receipts, badges, titles, and personas are presentation artifacts.
+
+Hard rules:
+- Do not collapse raw events, features, scores, and presentation into one rigid label system.
+- Do not store hard personas as immutable database truth.
+- Do not let social mechanics, viral mechanics, or public profile metadata modify core behavioral scoring.
+
+## 3) TECH STACK (REALITY-ALIGNED)
+Framework:
+- Next.js 16 (App Router, Turbopack)
+
+UI:
+- Tailwind (project-installed version) + shadcn/ui
+- Use @layer components/utilities in globals.css for micro-classes
+- Avoid transition-all; use targeted transitions only
+- Always respect prefers-reduced-motion
+
+Solana client signing:
+- Use @solana/wallet-adapter-react for publicKey + signMessage on the CLIENT
+- Existing code may use @solana/web3.js (PublicKey, base58 validation)
+- Do NOT refactor to @solana/kit unless explicitly asked
+- If @solana/kit is introduced, isolate it in NEW modules only and do not break existing signature utilities
+
+## 4) ARCHITECTURE CONSTRAINTS (CRITICAL)
+Database:
+- Supabase is ACTIVE
+- Use strict RLS
+- Never depend on an admin/service client for user-facing reads
+- Public routes must read only from sanitized public views, RPCs, or equivalent server-safe selectors
+- Never leak full wallet addresses in public share pages by default
+- Never expose private profile metadata, owner-only fields, or raw score components on public routes unless explicitly opted in and intentionally designed
+
+Server Actions:
+- Mutations must be done via Server Actions
+- Server must verify signatures deterministically (nonce + timestamp + canonical bytes)
+- Server must enforce rate limits
+- Client is responsible for signing only
+- Server is the source of truth for validation
+
+Routing:
+- /arena is global discovery (leaderboards, browsing, recruiting entry points)
+- /command-center is private "My Squads" lobby
+- /command-center/[projectId] is the Squad OS cockpit (tabs, slots, split, governance)
+
+Boundary rule:
+- Future squad/collaboration logic must remain layered on top of the intelligence system
+- Do not design wallet intelligence, token intelligence, or receipts around squad-specific assumptions
+
+## 5) WALLET AUTHORITY SAFETY (CRITICAL)
+- Use one signing authority per flow
+- The source of publicKey and signMessage must be the same provider for a given action
+- Never mix signer identity from multiple wallet/auth providers in a single signature flow
+- Never mix claimed wallet state across multiple providers without explicit reconciliation logic
+- Existing signature utilities and canonical message generation are authoritative
+- Do not change signature formats without explicit instruction
+
+## 6) WEAK LINK / TRUST MATH SCOPE (LIMITED)
+The Weak Link Principle is RESERVED for future squad / match / collaboration scoring surfaces.
+
+Hard rules:
+- Do NOT use Weak Link math as the primary scoring model for wallet intelligence
+- Do NOT use Weak Link math as the primary scoring model for wallet receipts
+- Do NOT use Weak Link math as the primary scoring model for token intelligence
+
+If squad scoring is implemented:
+- lowest trust / quality can pull down the group result
+- badge bonus cap: +25
+- context bonus cap: +20
+- global cap: 98 (never 100)
+
+Anti-Sybil rules for squad/match contexts:
+- Apply social badge decay [1, 0.6, 0.3] consistently
+- Maintain strict separation of SYSTEM vs SOCIAL badges
+- Viral titles may exist but must never inflate scores past caps
+
+## 7) WALLET INTELLIGENCE RECEIPTS (PUBLIC SAFE)
+Receipt requirements:
+- Masked wallet by default (e.g. 4x9P…1kQA)
+- Show score summary + tier + 3–5 short evidence bullets
+- Evidence bullets must be confidence-aware and behavior-based
+- Provide 1-click Share to X (tweet templates) and Copy Link
+- Provide compare loop: visitors can analyze their wallet and compare to the receipt
+
+Receipt rules:
+- Receipts are presentation artifacts, not database truth
+- Receipts must not override raw features or score snapshots
+- Receipt content should prioritize behavioral summary, quality tier, and confidence-aware evidence
+- Public share route must never reveal full wallet unless owner explicitly opts in
+- OG image must render only from a whitelisted, sanitized dataset (score/tier/masked wallet/badges/evidence snippets), never secrets or private metadata
+
+Suggested routes:
+- app/(marketing)/analyze/page.tsx
+- app/(public)/share/[shareId]/page.tsx
+- app/api/og/route.ts
+
+## 8) PUBLIC DATA SAFETY
+- Public endpoints may only expose masked or sanitized data by default
+- Never expose full wallet addresses on public share pages unless explicitly opted in
+- Never expose raw internal scoring inputs unless the product explicitly supports explainability output for that route
+- Explainability on public routes must be intentionally curated and safe
+- OG generation must use whitelisted fields only
+- Do not join arbitrary private/internal tables into public pages
+
+## 9) SECURITY & CODE BEHAVIOR
+Hydration safety:
+- Any browser API usage requires "use client"
+- Avoid server/client boundary violations
+- Avoid hydration mismatches from client-only wallet state leaking into server-rendered markup without guards
+
+Performance:
+- No transition-all
+- Keep animations subtle
+- Add motion-reduce guards
+- Avoid heavy backdrop-blur on large full-screen containers unless clearly necessary
+- Prefer targeted rendering and avoid unnecessary client components
+
+Accessibility:
+- Icon-only buttons require aria-label
+- Tabs must use proper aria roles and keyboard support if implemented
+- Respect focus visibility and keyboard navigation
+
+## 10) SELF-CORRECTION SAFETY
+If a change causes build/tsc/lint errors, fix them autonomously, but:
+- do NOT disable validation to make errors disappear
+- do NOT widen types to any as a shortcut
+- do NOT suppress lint/type errors unless explicitly justified and localized
+- do NOT bypass security checks, signature validation, or RLS expectations
+- do NOT introduce new global state libraries (Redux/Zustand/Context) unless explicitly requested
+
+## 11) FILE CONTEXT / REFERENCES
+- Existing signature utilities and canonical message generation are authoritative
+- Existing server action patterns are authoritative
+- Use existing return shape patterns: { success, data?, error? }
+- Existing masked-wallet presentation utilities should be reused where possible
+- Existing public-safe route patterns should be preferred over inventing new ones
+
+## 12) AI AGENT RULES (IF AI LAYER IS TOUCHED)
+AI is an analyst, not an oracle.
+
+Hard rules:
+- AI must not replace deterministic scoring
+- AI must not invent trust claims unsupported by features/scores
+- AI outputs are analysis artifacts, not database truth
+- AI may explain, summarize, investigate, and compose reports
+- AI must not directly modify core scores, confidence, or suspiciousness outputs
+
+Safe uses:
+- wallet score explanation
+- behavior summaries
+- token community summaries
+- squad fragility explanations
+- shareable report copy
+
+Unsafe uses:
+- LLM-generated primary trust score
+- LLM-generated canonical persona as database truth
+- unrestricted model access to private/internal data
+- hallucinated fraud/scam accusations without controlled language
+
+Language rule:
+- prefer "signal suggests", "pattern indicates", "elevated anomaly"
+- avoid absolute claims like "scammer", "fraud", or "safe" unless explicitly backed by approved product policy
+
+## 13) FINAL PRODUCT GUARDRAILS
+- PumpMatch is not just a trust score app
+- PumpMatch is not a copy-trade app
+- PumpMatch is not a clout leaderboard product
+- PumpMatch first builds behavioral intelligence
+- Then it builds reputation surfaces
+- Then it may build squad coordination and governance layers
+
+Any implementation that reverses this order is strategically invalid.

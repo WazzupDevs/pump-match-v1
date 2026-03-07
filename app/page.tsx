@@ -230,13 +230,13 @@ export default function Home() {
           {/* Main title */}
           <h1 className="mx-auto max-w-3xl text-6xl font-black leading-none tracking-tighter sm:text-7xl lg:text-8xl xl:text-9xl text-balance">
             <span
-              className="bg-gradient-to-br from-emerald-300 via-emerald-400 to-cyan-400 bg-clip-text text-transparent"
+              className="bg-linear-to-br from-emerald-300 via-emerald-400 to-cyan-400 bg-clip-text text-transparent"
               style={{ filter: "drop-shadow(0 0 60px rgba(16,185,129,0.45))" }}
             >
               Pump
             </span>
             <span
-              className="bg-gradient-to-br from-violet-300 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent"
+              className="bg-linear-to-br from-violet-300 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent"
               style={{ filter: "drop-shadow(0 0 60px rgba(168,85,247,0.35))" }}
             >
               Match
@@ -297,7 +297,7 @@ export default function Home() {
               </p>
               <h2 className="text-3xl font-black text-slate-100 sm:text-4xl">
                 Global Arena{" "}
-                <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+                <span className="bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
                   Leaderboard
                 </span>
               </h2>
@@ -309,7 +309,7 @@ export default function Home() {
             {/* Glass table */}
             <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl">
               {/* Top accent */}
-              <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-amber-500/0 via-amber-500/50 to-amber-500/0" />
+              <div className="absolute top-0 inset-x-0 h-px bg-linear-to-r from-amber-500/0 via-amber-500/50 to-amber-500/0" />
 
               {/* Header row */}
               <div className="grid grid-cols-[3rem_1fr_5rem_6rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem] items-center px-5 py-3 border-b border-slate-800/70 text-[10px] font-bold uppercase tracking-widest text-slate-600">
@@ -397,11 +397,11 @@ export default function Home() {
             </p>
             <h2 className="text-3xl font-black text-slate-100 sm:text-4xl lg:text-5xl">
               Analyze →{" "}
-              <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+              <span className="bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
                 Compete
               </span>{" "}
               →{" "}
-              <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
+              <span className="bg-linear-to-rrom-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
                 Squad Up
               </span>
             </h2>
@@ -420,7 +420,7 @@ export default function Home() {
                   className={`group relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/50 backdrop-blur-xl p-7 transition-colors duration-300 hover:border-slate-600/70 hover:shadow-xl ${f.glow}`}
                 >
                   {/* Top accent line */}
-                  <div className={`absolute top-0 inset-x-0 h-px bg-gradient-to-r ${f.topBar}`} />
+                  <div className={`absolute top-0 inset-x-0 h-px bg-linear-to-r ${f.topBar}`} />
 
                   {/* Icon row */}
                   <div className="mb-5 flex items-center justify-between">
@@ -442,14 +442,14 @@ export default function Home() {
                   <ul className="space-y-2.5">
                     {f.bullets.map((b) => (
                       <li key={b} className="flex items-center gap-2.5 text-xs text-slate-400">
-                        <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${f.iconBg.replace("/10", "/60")}`} />
+                        <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${f.iconBg.replace("/10", "/60")}`} />
                         {b}
                       </li>
                     ))}
                   </ul>
 
                   <div
-                    className={`absolute bottom-0 inset-x-0 h-0.5 bg-gradient-to-r ${f.topBar} scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`}
+                    className={`absolute bottom-0 inset-x-0 h-0.5 bg-linear-to-r{f.topBar} scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`}
                   />
                 </div>
               );
@@ -468,14 +468,14 @@ export default function Home() {
               </p>
               <h2 className="text-3xl font-black text-slate-100 sm:text-4xl">
                 Up and running in{" "}
-                <span className="bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent">
+                <span className="bg-linear-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent">
                   three steps
                 </span>
               </h2>
             </div>
 
             <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
-              <div className="absolute top-9 left-[calc(16.67%+2rem)] right-[calc(16.67%+2rem)] h-px bg-gradient-to-r from-emerald-500/25 via-cyan-500/25 to-violet-500/25 hidden md:block pointer-events-none" />
+              <div className="absolute top-9 left-[calc(16.67%+2rem)] right-[calc(16.67%+2rem)] h-px bg-linear-to-r from-emerald-500/25 via-cyan-500/25 to-violet-500/25 hidden md:block pointer-events-none" />
 
               {HOW_IT_WORKS.map((s) => {
                 const Icon = s.icon;
@@ -502,7 +502,7 @@ export default function Home() {
         <section className="border-t border-slate-800/50">
           <div className="mx-auto max-w-3xl px-4 py-28 sm:py-36 text-center">
             <div className="relative mx-auto max-w-2xl">
-              <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/10 via-cyan-500/8 to-violet-500/10 rounded-3xl blur-2xl pointer-events-none" />
+              <div className="absolute -inset-4 bg-linear-to-r from-emerald-500/10 via-cyan-500/8 to-violet-500/10 rounded-3xl blur-2xl pointer-events-none" />
 
               <div className="relative rounded-3xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl p-10 sm:p-14">
                 <div className="mb-5 inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
@@ -511,7 +511,7 @@ export default function Home() {
 
                 <h2 className="text-3xl font-black text-slate-100 mb-4 sm:text-4xl leading-tight">
                   Ready to build{" "}
-                  <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                  <span className="bg-linear-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
                     verified trust?
                   </span>
                 </h2>

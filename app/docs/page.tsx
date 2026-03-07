@@ -7,14 +7,18 @@ import {
   TrustSection,
   SquadOsSection,
   RoadmapSection,
+  IntelligenceCoreV2Section,
 } from "@/components/docs/content-sections";
 
-// Content Map pattern: each tab key maps to a component
+// Content Map pattern: each tab key maps to a component.
+// "grand-vision" is the canonical preferred slug; "roadmap" is the legacy alias.
 const contentMap: Record<string, React.ReactNode> = {
   intro: <IntroSection />,
+  "intelligence-core-v2": <IntelligenceCoreV2Section />,
   trust: <TrustSection />,
   "squad-os": <SquadOsSection />,
   roadmap: <RoadmapSection />,
+  "grand-vision": <RoadmapSection />,
 };
 
 function DocsContent() {
