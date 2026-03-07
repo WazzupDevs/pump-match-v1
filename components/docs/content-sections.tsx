@@ -129,7 +129,7 @@ export function IntroSection() {
     {
       icon: <Users className="h-4 w-4 text-emerald-400" aria-hidden="true" />,
       label: "Coordination Built on Intelligence",
-      desc: "Squad formation is a future layer. It must be built on top of credible intelligence and reputation — not the other way around.",
+      desc: "Squad formation is a future layer. It must be built on top of credible intelligence and reputation  not the other way around.",
     },
   ];
 
@@ -144,7 +144,7 @@ export function IntroSection() {
       step: "02",
       title: "Interpret",
       icon: <BarChart3 className="h-5 w-5 text-emerald-400" aria-hidden="true" />,
-      desc: "Our intelligence engine produces multi-axis outputs — style, quality, suspiciousness, and confidence — rather than a single opaque trust number.",
+      desc: "Our intelligence engine produces multi axis outputs  style, quality, suspiciousness, and confidence  rather than a single opaque trust number.",
     },
     {
       step: "03",
@@ -513,7 +513,7 @@ export function IntelligenceCoreV2Section() {
     {
       label: "Confidence Metric",
       items: ["Sample size", "Recency weight", "Data completeness"],
-      desc: "Every score ships with a confidence rating — low sample sizes are never presented as high-certainty outputs.",
+      desc: "Every score ships with a confidence rating  low sample sizes are never presented as high-certainty outputs.",
       icon: <Shield className="h-4 w-4 text-slate-400" />,
       border: "border-slate-700/50",
     },
@@ -643,7 +643,7 @@ Presentation    ──► UI artifacts only (persona label, receipt, badge)`}</C
       <H2>3. Score Taxonomy (Multi-Axial)</H2>
 
       <P>
-        We do not use a single, opaque "Trust Score". We provide multi-axis
+        We do not use a single, opaque "Trust Score". We provide multi axis
         analysis. Each axis is independently computed, versioned, and
         explainable.
       </P>
