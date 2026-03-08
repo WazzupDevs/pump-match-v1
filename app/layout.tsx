@@ -14,16 +14,18 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const TITLE = "PumpMatch | The Trust Layer for Solana";
+const TITLE = "PumpMatch | Behavioral Intelligence for Solana";
 const DESCRIPTION =
-  "Build verified Web3 squads, derive verifiable on-chain reputation, and unlock trustless collaboration across the Solana ecosystem.";
+  "Explainable wallet and token intelligence for Solana. Analyze behavior, interpret reputation signals, and build on a future coordination layer powered by observable on-chain activity.";
 
 export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+  ),
   alternates: { canonical: "/" },
-  other: { "theme-color": "#020617" },
+  themeColor: "#020617",
   openGraph: {
     type: "website",
     url: "/",
@@ -32,10 +34,10 @@ export const metadata: Metadata = {
     siteName: "PumpMatch",
     images: [
       {
-        url: "/og-image.png",
+        url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "PumpMatch — The Trust Layer for Solana",
+        alt: "PumpMatch | Behavioral Intelligence for Solana",
       },
     ],
   },
@@ -43,7 +45,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: TITLE,
     description: DESCRIPTION,
-    images: ["/og-image.png"],
+    images: ["/opengraph-image"],
   },
   robots: { index: true, follow: true },
 };

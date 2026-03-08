@@ -39,86 +39,86 @@ interface LeaderboardRow {
 
 const FEATURES = [
   {
-    icon:      BarChart3,
-    iconBg:    "bg-cyan-500/10",
+    icon: BarChart3,
+    iconBg: "bg-cyan-500/10",
     iconColor: "text-cyan-400",
-    topBar:    "from-cyan-500/0 via-cyan-500/60 to-cyan-500/0",
-    glow:      "group-hover:shadow-cyan-500/10",
-    badge:     "On-Chain Intel",
-    title:     "Analyze Your Wallet",
-    desc:      "Deep dive into your on-chain history. Calculate Style and Quality scores, token win rates, and get assigned a secure behavioral profile.",
+    topBar: "from-cyan-500/0 via-cyan-500/60 to-cyan-500/0",
+    glow: "group-hover:shadow-cyan-500/10",
+    badge: "Wallet Intelligence",
+    title: "Understand Wallet Behavior",
+    desc: "Turn raw on-chain activity into explainable signals. Surface style, quality, suspiciousness, and confidence-aware behavioral analysis.",
     bullets: [
-      "Style and Quality score breakdown",
-      "Token win rates and hold patterns",
-      "Verified behavioral profile assigned",
+      "Style, quality, and confidence breakdown",
+      "Hold patterns, activity, and behavioral signals",
+      "Explainable intelligence from observable history",
     ],
   },
   {
-    icon:      Radio,
-    iconBg:    "bg-amber-500/10",
+    icon: Radio,
+    iconBg: "bg-amber-500/10",
     iconColor: "text-amber-400",
-    topBar:    "from-amber-500/0 via-amber-500/60 to-amber-500/0",
-    glow:      "group-hover:shadow-amber-500/10",
-    badge:     "Token Intel",
-    title:     "Analyze Token Communities",
-    desc:      "Move beyond individual wallets. Analyze token holder compositions, detect suspicious clusters, and evaluate community quality at scale.",
+    topBar: "from-amber-500/0 via-amber-500/60 to-amber-500/0",
+    glow: "group-hover:shadow-amber-500/10",
+    badge: "Token Intelligence",
+    title: "Read Communities, Not Just Charts",
+    desc: "Go beyond individual wallets. Analyze holder composition, churn, suspicious clusters, and community quality at scale.",
     bullets: [
       "Holder composition breakdown",
       "Suspicious cluster detection",
-      "Community quality scoring",
+      "Community quality and fragility signals",
     ],
   },
   {
-    icon:      BadgeCheck,
-    iconBg:    "bg-violet-500/10",
+    icon: BadgeCheck,
+    iconBg: "bg-violet-500/10",
     iconColor: "text-violet-400",
-    topBar:    "from-violet-500/0 via-violet-500/60 to-violet-500/0",
-    glow:      "group-hover:shadow-violet-500/10",
-    badge:     "Public Proof",
-    title:     "Establish Verifiable Proof",
-    desc:      "Mint your behavioral profile as a shareable Trust Receipt. Use your proven on-chain history as a coordination asset across Solana.",
+    topBar: "from-violet-500/0 via-violet-500/60 to-violet-500/0",
+    glow: "group-hover:shadow-violet-500/10",
+    badge: "Public Proof",
+    title: "Establish Verifiable Public Proof",
+    desc: "Turn explainable behavioral signals into a masked, shareable Wallet Intelligence Receipt that can travel across Solana.",
     bullets: [
-      "Shareable Trust Receipt artifact",
-      "Explainable score breakdown",
-      "Portable reputation across Solana",
+      "Shareable Wallet Intelligence Receipt",
+      "Explainable evidence and score context",
+      "Portable proof built from behavior",
     ],
   },
 ] as const;
 
 const HOW_IT_WORKS = [
   {
-    step:  "01",
-    icon:  ShieldCheck,
+    step: "01",
+    icon: ShieldCheck,
     color: "text-emerald-400",
-    bg:    "bg-emerald-500/10 border-emerald-500/20",
+    bg: "bg-emerald-500/10 border-emerald-500/20",
     title: "Connect Your Wallet",
-    desc:  "Sign in with Phantom in one click. No email. No password. Your wallet is your identity.",
+    desc: "Sign in with Phantom in one click to analyze your behavior and unlock private product surfaces.",
   },
   {
-    step:  "02",
-    icon:  Zap,
+    step: "02",
+    icon: Zap,
     color: "text-cyan-400",
-    bg:    "bg-cyan-500/10 border-cyan-500/20",
-    title: "Analyze Your Behavior",
-    desc:  "We analyze your on-chain history, token activity, and trading patterns to compute your behavioral scores.",
+    bg: "bg-cyan-500/10 border-cyan-500/20",
+    title: "Interpret Your Behavior",
+    desc: "We transform on-chain activity into explainable outputs such as style, quality, suspiciousness, and confidence.",
   },
   {
-    step:  "03",
-    icon:  Award,
+    step: "03",
+    icon: Award,
     color: "text-violet-400",
-    bg:    "bg-violet-500/10 border-violet-500/20",
-    title: "Build Your Reputation",
-    desc:  "Get a verifiable, explainable proof of your on-chain behavior. Share your Trust Receipt and establish your reputation on Solana.",
+    bg: "bg-violet-500/10 border-violet-500/20",
+    title: "Build Public Proof",
+    desc: "Turn those signals into a shareable receipt and reputation surface, forming the foundation for future coordination.",
   },
 ] as const;
 
 const TIER_COLORS: Record<string, string> = {
-  Legendary:   "text-amber-400",
-  Elite:       "text-violet-400",
-  Proven:      "text-cyan-400",
+  Legendary: "text-amber-400",
+  Elite: "text-violet-400",
+  Proven: "text-cyan-400",
   Contributor: "text-emerald-400",
-  Newbie:      "text-slate-400",
-  EXILED:      "text-red-500",
+  Newbie: "text-slate-400",
+  EXILED: "text-red-500",
 };
 
 const RANK_ICONS = [Crown, Medal, Trophy];
@@ -156,10 +156,12 @@ function useTopOperators(limit = 5) {
 
       const typed = (data ?? []) as unknown as RawLbRow[];
       const mapped: LeaderboardRow[] = typed.map((r, i) => ({
-        rank:   i + 1,
-        handle: (Array.isArray(r.profiles) ? r.profiles[0]?.x_handle : null) ?? `Operator #${i + 1}`,
-        score:  Math.round(r.composite_score ?? 0),
-        tier:   r.tier ?? "Newbie",
+        rank: i + 1,
+        handle:
+          (Array.isArray(r.profiles) ? r.profiles[0]?.x_handle : null) ??
+          `Operator #${i + 1}`,
+        score: Math.round(r.composite_score ?? 0),
+        tier: r.tier ?? "Newbie",
       }));
 
       setRows(mapped);
@@ -167,7 +169,9 @@ function useTopOperators(limit = 5) {
     }
 
     fetch();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [limit]);
 
   return { rows, loading };
@@ -183,13 +187,12 @@ export default function Home() {
   const { rows: leaderboard, loading: lbLoading } = useTopOperators(5);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans overflow-x-hidden">
-
+    <div className="min-h-screen overflow-x-hidden bg-slate-950 font-sans text-slate-50">
       {/* ── Navbar ───────────────────────────────────────────────────────────── */}
       <Navbar>
         <Link
           href="/command-center"
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-400 border border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-sm font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/15"
         >
           Launch App
           <ArrowRight className="h-3.5 w-3.5" />
@@ -197,7 +200,7 @@ export default function Home() {
       </Navbar>
 
       {/* ── Ambient background ────────────────────────────────────────────────── */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute inset-0 opacity-[0.022]"
           style={{
@@ -212,41 +215,42 @@ export default function Home() {
       </div>
 
       <main id="main-content" className="relative">
-
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* HERO                                                                   */}
+        {/* HERO                                                                 */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="flex min-h-screen flex-col items-center justify-center px-4 pt-24 pb-20 text-center">
-
           {/* Live badge */}
-          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/8 px-4 py-1.5 text-xs font-semibold text-emerald-400 uppercase tracking-widest">
+          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/8 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-400">
             <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
               <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping motion-reduce:animate-none" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
             </span>
-            Solana · Season 1 · Live Now
+            Behavioral Intelligence · Solana · Live Now
           </div>
 
           {/* Main title */}
-          <h1 className="mx-auto max-w-3xl text-6xl font-black leading-none tracking-tighter sm:text-7xl lg:text-8xl xl:text-9xl text-balance">
+          <h1 className="mx-auto max-w-4xl text-balance text-6xl font-black leading-none tracking-tighter sm:text-7xl lg:text-8xl xl:text-9xl">
             <span
               className="bg-linear-to-br from-emerald-300 via-emerald-400 to-cyan-400 bg-clip-text text-transparent"
               style={{ filter: "drop-shadow(0 0 60px rgba(16,185,129,0.45))" }}
             >
-              Pump
-            </span>
+              Behavioral
+            </span>{" "}
             <span
               className="bg-linear-to-br from-violet-300 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent"
               style={{ filter: "drop-shadow(0 0 60px rgba(168,85,247,0.35))" }}
             >
-              Match
+              Intelligence
             </span>
+            <br />
+            <span className="text-slate-100">for Solana</span>
           </h1>
 
           {/* Subtitle */}
-          <p className="mx-auto max-w-2xl text-base text-slate-400 leading-relaxed sm:text-xl">
-            Stop guessing who to trust. PumpMatch derives verifiable reputation from on-chain history,
-            helps you form elite squads, and unlocks trustless collaboration  from recruiting to revenue splitting.
+          <p className="mx-auto max-w-3xl text-base leading-relaxed text-slate-400 sm:text-xl">
+            PumpMatch turns raw on-chain activity into explainable wallet, token,
+            and community intelligence — building the foundation for reputation
+            and future high-signal coordination.
           </p>
 
           {/* ── Single CTA cluster — no duplicates ───────────────────────── */}
@@ -260,19 +264,32 @@ export default function Home() {
                   Enter Command Center
                   <span className="text-xl">🚀</span>
                 </Link>
-                {/* İŞTE BURAYA DISCONNECT BUTONUNU EKLİYORUZ */}
                 <Web3LoginButton size="default" />
               </>
             ) : (
               <Web3LoginButton size="lg" />
             )}
+            <Link
+              href="/docs"
+              className="text-sm font-semibold text-slate-400 transition-colors hover:text-slate-200"
+            >
+              Read the Docs
+            </Link>
           </div>
 
-          {/* Trust tokens */}
+          {/* Value strip */}
           <div className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-600">
-            {["Powered by Solana", "Secured by Supabase", "PKCE Auth", "Non-custodial"].map((t) => (
+            {[
+              "Explainable Signals",
+              "Confidence-Aware Outputs",
+              "Behavior Over Balance",
+              "Future Coordination Layer",
+            ].map((t) => (
               <span key={t} className="flex items-center gap-1.5">
-                <ShieldCheck className="h-3 w-3 text-emerald-700" aria-hidden="true" />
+                <ShieldCheck
+                  className="h-3 w-3 text-emerald-700"
+                  aria-hidden="true"
+                />
                 {t}
               </span>
             ))}
@@ -280,39 +297,40 @@ export default function Home() {
 
           {/* Scroll hint */}
           <div className="mt-16 opacity-30 motion-reduce:hidden">
-            <div className="mx-auto h-10 w-6 rounded-full border border-slate-700 flex items-start justify-center pt-2">
+            <div className="mx-auto flex h-10 w-6 items-start justify-center rounded-full border border-slate-700 pt-2">
               <div className="h-2 w-1 rounded-full bg-slate-400 animate-bounce motion-reduce:animate-none" />
             </div>
           </div>
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* LIVE LEADERBOARD — Top Operators Preview                              */}
+        {/* LIVE LEADERBOARD — Top Operators Preview                            */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="border-y border-slate-800/60">
           <div className="mx-auto max-w-3xl px-4 py-20 sm:py-28">
             <div className="mb-10 text-center">
               <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-amber-500">
-                Live Rankings
+                Public Signals
               </p>
               <h2 className="text-3xl font-black text-slate-100 sm:text-4xl">
                 Global Arena{" "}
                 <span className="bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
-                  Leaderboard
+                  Preview
                 </span>
               </h2>
-              <p className="mx-auto mt-4 max-w-md text-slate-500 text-sm leading-relaxed">
-                The top operators on Solana, ranked by verified Trust Score. Updated in real time.
+              <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-500">
+                A live look at public operators ranked by behavioral reputation
+                signals and visible score surfaces.
               </p>
             </div>
 
             {/* Glass table */}
             <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl">
               {/* Top accent */}
-              <div className="absolute top-0 inset-x-0 h-px bg-linear-to-r from-amber-500/0 via-amber-500/50 to-amber-500/0" />
+              <div className="absolute inset-x-0 top-0 h-px bg-linear-to-r from-amber-500/0 via-amber-500/50 to-amber-500/0" />
 
               {/* Header row */}
-              <div className="grid grid-cols-[3rem_1fr_5rem_6rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem] items-center px-5 py-3 border-b border-slate-800/70 text-[10px] font-bold uppercase tracking-widest text-slate-600">
+              <div className="grid grid-cols-[3rem_1fr_5rem_6rem] items-center border-b border-slate-800/70 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 sm:grid-cols-[3.5rem_1fr_6rem_7rem]">
                 <span>#</span>
                 <span>Operator</span>
                 <span className="text-right">Score</span>
@@ -322,47 +340,60 @@ export default function Home() {
               {/* Rows */}
               {lbLoading ? (
                 <div className="px-5 py-10 text-center">
-                  <div className="inline-block h-5 w-5 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
-                  <p className="mt-3 text-xs text-slate-600">Loading top operators…</p>
+                  <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+                  <p className="mt-3 text-xs text-slate-600">
+                    Loading arena preview…
+                  </p>
                 </div>
               ) : leaderboard.length === 0 ? (
                 <div className="px-5 py-10 text-center text-sm text-slate-600">
-                  No arena data yet. Be the first to compete!
+                  No public arena data yet. Be the first to analyze and appear.
                 </div>
               ) : (
                 leaderboard.map((entry) => {
                   const RankIcon = RANK_ICONS[entry.rank - 1];
-                  const rankColors = ["text-amber-400", "text-slate-300", "text-amber-600"];
+                  const rankColors = [
+                    "text-amber-400",
+                    "text-slate-300",
+                    "text-amber-600",
+                  ];
+
                   return (
                     <div
                       key={entry.rank}
-                      className="grid grid-cols-[3rem_1fr_5rem_6rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem] items-center px-5 py-3.5 border-b border-slate-800/40 last:border-b-0 hover:bg-slate-800/30 transition-colors"
+                      className="grid grid-cols-[3rem_1fr_5rem_6rem] items-center border-b border-slate-800/40 px-5 py-3.5 transition-colors hover:bg-slate-800/30 last:border-b-0 sm:grid-cols-[3.5rem_1fr_6rem_7rem]"
                     >
                       {/* Rank */}
                       <span className="flex items-center">
                         {RankIcon ? (
-                          <RankIcon className={`h-4 w-4 ${rankColors[entry.rank - 1]}`} />
+                          <RankIcon
+                            className={`h-4 w-4 ${rankColors[entry.rank - 1]}`}
+                          />
                         ) : (
-                          <span className="text-sm font-bold text-slate-600 tabular-nums">
+                          <span className="text-sm font-bold tabular-nums text-slate-600">
                             {entry.rank}
                           </span>
                         )}
                       </span>
 
                       {/* Handle */}
-                      <span className="text-sm font-semibold text-slate-200 truncate">
+                      <span className="truncate text-sm font-semibold text-slate-200">
                         {entry.handle.startsWith("Operator")
                           ? entry.handle
                           : `@${entry.handle}`}
                       </span>
 
                       {/* Score */}
-                      <span className="text-right text-sm font-bold text-emerald-400 tabular-nums">
+                      <span className="text-right text-sm font-bold tabular-nums text-emerald-400">
                         {entry.score}
                       </span>
 
                       {/* Tier */}
-                      <span className={`text-right text-xs font-bold uppercase tracking-wider ${TIER_COLORS[entry.tier] ?? "text-slate-500"}`}>
+                      <span
+                        className={`text-right text-xs font-bold uppercase tracking-wider ${
+                          TIER_COLORS[entry.tier] ?? "text-slate-500"
+                        }`}
+                      >
                         {entry.tier}
                       </span>
                     </div>
@@ -371,15 +402,15 @@ export default function Home() {
               )}
 
               {/* Footer */}
-              <div className="px-5 py-3 border-t border-slate-800/70 flex items-center justify-between">
+              <div className="flex items-center justify-between border-t border-slate-800/70 px-5 py-3">
                 <span className="text-[10px] uppercase tracking-widest text-slate-700">
                   Season 1 · Solana Mainnet
                 </span>
                 <Link
                   href="/command-center"
-                  className="text-xs font-semibold text-amber-500 hover:text-amber-400 transition-colors inline-flex items-center gap-1"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-amber-500 transition-colors hover:text-amber-400"
                 >
-                  Full Leaderboard
+                  Explore Arena
                   <ArrowRight className="h-3 w-3" />
                 </Link>
               </div>
@@ -388,14 +419,14 @@ export default function Home() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* FEATURES — bento-style 3-col glass cards                              */}
+        {/* FEATURES — bento-style 3-col glass cards                            */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="mx-auto max-w-6xl px-4 py-28 sm:py-36">
           <div className="mb-16 text-center">
             <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-emerald-500">
               Core Loop
             </p>
-            <h2 className="text-2xl font-black text-slate-100 sm:text-4xl lg:text-5xl whitespace-normal">
+            <h2 className="text-2xl font-black whitespace-normal text-slate-100 sm:text-4xl lg:text-5xl">
               <span className="inline-block">Analyze&nbsp;</span>
               <span className="inline-block text-slate-500">&rarr;</span>
               <span className="inline-block">&nbsp;</span>
@@ -409,9 +440,10 @@ export default function Home() {
                 Prove
               </span>
             </h2>
-            <p className="mx-auto mt-5 max-w-lg text-slate-500 text-sm leading-relaxed">
-              Three interconnected systems built to surface behavioral intelligence, translate it into
-              explainable signals, and establish verifiable on-chain reputation.
+            <p className="mx-auto mt-5 max-w-lg text-sm leading-relaxed text-slate-500">
+              Three connected systems built to surface behavioral intelligence,
+              translate it into explainable signals, and turn it into public-safe
+              proof.
             </p>
           </div>
 
@@ -421,39 +453,53 @@ export default function Home() {
               return (
                 <div
                   key={f.title}
-                  className={`group relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/50 backdrop-blur-xl p-7 transition-colors duration-300 hover:border-slate-600/70 hover:shadow-xl ${f.glow}`}
+                  className={`group relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/50 p-7 backdrop-blur-xl transition-colors duration-300 hover:border-slate-600/70 hover:shadow-xl ${f.glow}`}
                 >
                   {/* Top accent line */}
-                  <div className={`absolute top-0 inset-x-0 h-px bg-linear-to-r ${f.topBar}`} />
+                  <div
+                    className={`absolute inset-x-0 top-0 h-px bg-linear-to-r ${f.topBar}`}
+                  />
 
                   {/* Icon row */}
                   <div className="mb-5 flex items-center justify-between">
-                    <div className={`inline-flex items-center justify-center h-12 w-12 rounded-xl ${f.iconBg}`}>
+                    <div
+                      className={`inline-flex h-12 w-12 items-center justify-center rounded-xl ${f.iconBg}`}
+                    >
                       <Icon className={`h-6 w-6 ${f.iconColor}`} />
                     </div>
-                    <span className={`text-[10px] font-bold uppercase tracking-widest ${f.iconColor} opacity-60`}>
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-widest ${f.iconColor} opacity-60`}
+                    >
                       {f.badge}
                     </span>
                   </div>
 
-                  <h3 className="text-xl font-black text-slate-100 mb-3 leading-tight">
+                  <h3 className="mb-3 text-xl font-black leading-tight text-slate-100">
                     {f.title}
                   </h3>
-                  <p className="text-sm text-slate-500 leading-relaxed mb-6">
+                  <p className="mb-6 text-sm leading-relaxed text-slate-500">
                     {f.desc}
                   </p>
 
                   <ul className="space-y-2.5">
                     {f.bullets.map((b) => (
-                      <li key={b} className="flex items-center gap-2.5 text-xs text-slate-400">
-                        <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${f.iconBg.replace("/10", "/60")}`} />
+                      <li
+                        key={b}
+                        className="flex items-center gap-2.5 text-xs text-slate-400"
+                      >
+                        <span
+                          className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${f.iconBg.replace(
+                            "/10",
+                            "/60"
+                          )}`}
+                        />
                         {b}
                       </li>
                     ))}
                   </ul>
 
                   <div
-                    className={`absolute bottom-0 inset-x-0 h-0.5 bg-linear-to-r{f.topBar} scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`}
+                    className={`absolute inset-x-0 bottom-0 h-0.5 scale-x-0 origin-left bg-linear-to-r ${f.topBar} transition-transform duration-500 group-hover:scale-x-100`}
                   />
                 </div>
               );
@@ -462,7 +508,7 @@ export default function Home() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* HOW IT WORKS                                                           */}
+        {/* HOW IT WORKS                                                         */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="border-t border-slate-800/50 bg-slate-900/20">
           <div className="mx-auto max-w-5xl px-4 py-28 sm:py-36">
@@ -479,20 +525,29 @@ export default function Home() {
             </div>
 
             <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
-              <div className="absolute top-9 left-[calc(16.67%+2rem)] right-[calc(16.67%+2rem)] h-px bg-linear-to-r from-emerald-500/25 via-cyan-500/25 to-violet-500/25 hidden md:block pointer-events-none" />
+              <div className="pointer-events-none absolute top-9 left-[calc(16.67%+2rem)] right-[calc(16.67%+2rem)] hidden h-px bg-linear-to-r from-emerald-500/25 via-cyan-500/25 to-violet-500/25 md:block" />
 
               {HOW_IT_WORKS.map((s) => {
                 const Icon = s.icon;
                 return (
-                  <div key={s.step} className="relative flex flex-col items-center text-center px-4 py-6">
-                    <div className={`relative mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border ${s.bg}`}>
+                  <div
+                    key={s.step}
+                    className="relative flex flex-col items-center px-4 py-6 text-center"
+                  >
+                    <div
+                      className={`relative mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border ${s.bg}`}
+                    >
                       <Icon className={`h-7 w-7 ${s.color}`} />
-                      <span className="absolute -top-2.5 -right-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 border border-slate-700 text-[9px] font-black text-slate-500">
+                      <span className="absolute -top-2.5 -right-2.5 flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 bg-slate-950 text-[9px] font-black text-slate-500">
                         {s.step}
                       </span>
                     </div>
-                    <h3 className="text-base font-bold text-slate-100 mb-2">{s.title}</h3>
-                    <p className="text-sm text-slate-500 leading-relaxed max-w-xs">{s.desc}</p>
+                    <h3 className="mb-2 text-base font-bold text-slate-100">
+                      {s.title}
+                    </h3>
+                    <p className="max-w-xs text-sm leading-relaxed text-slate-500">
+                      {s.desc}
+                    </p>
                   </div>
                 );
               })}
@@ -501,28 +556,29 @@ export default function Home() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* FINAL CTA                                                              */}
+        {/* FINAL CTA                                                            */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="border-t border-slate-800/50">
-          <div className="mx-auto max-w-3xl px-4 py-28 sm:py-36 text-center">
+          <div className="mx-auto max-w-3xl px-4 py-28 text-center sm:py-36">
             <div className="relative mx-auto max-w-2xl">
-              <div className="absolute -inset-4 bg-linear-to-r from-emerald-500/10 via-cyan-500/8 to-violet-500/10 rounded-3xl blur-2xl pointer-events-none" />
+              <div className="pointer-events-none absolute -inset-4 rounded-3xl bg-linear-to-r from-emerald-500/10 via-cyan-500/8 to-violet-500/10 blur-2xl" />
 
-              <div className="relative rounded-3xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl p-10 sm:p-14">
-                <div className="mb-5 inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+              <div className="relative rounded-3xl border border-slate-700/50 bg-slate-900/60 p-10 backdrop-blur-xl sm:p-14">
+                <div className="mb-5 inline-flex rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3">
                   <Logo className="h-10 w-10" />
                 </div>
 
-                <h2 className="text-3xl font-black text-slate-100 mb-4 sm:text-4xl leading-tight">
-                  Ready to build{" "}
+                <h2 className="mb-4 text-3xl leading-tight font-black text-slate-100 sm:text-4xl">
+                  Start with{" "}
                   <span className="bg-linear-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                    verified trust?
+                    Intelligence.
                   </span>
                 </h2>
 
-                <p className="text-slate-400 text-sm leading-relaxed mb-9 max-w-sm mx-auto">
-                  Connect your wallet and let your on-chain history speak for itself.
-                  It takes 10 seconds.
+                <p className="mx-auto mb-9 max-w-md text-sm leading-relaxed text-slate-400">
+                  Analyze a wallet, interpret real behavior, and explore the
+                  system that turns on-chain activity into reputation and future
+                  coordination.
                 </p>
 
                 <div className="flex flex-col items-center gap-3">
@@ -537,20 +593,28 @@ export default function Home() {
                   ) : (
                     <Web3LoginButton size="lg" />
                   )}
-                  <p className="text-xs text-slate-700 mt-1">
+
+                  <Link
+                    href="/docs"
+                    className="text-sm font-semibold text-slate-400 transition-colors hover:text-slate-200"
+                  >
+                    Explore Docs
+                  </Link>
+
+                  <p className="mt-1 text-xs text-slate-700">
                     No registration · Non-custodial · Open source
                   </p>
                 </div>
 
                 {/* Social proof */}
-                <div className="mt-8 pt-8 border-t border-slate-800/70 flex flex-wrap items-center justify-center gap-5 text-xs text-slate-600">
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-5 border-t border-slate-800/70 pt-8 text-xs text-slate-600">
                   <span className="flex items-center gap-1.5">
                     <Star className="h-3 w-3 text-amber-500" />
-                    Top Solana DApp — Season 1
+                    Built for Solana operators
                   </span>
                   <span className="flex items-center gap-1.5">
                     <TrendingUp className="h-3 w-3 text-emerald-600" />
-                    1,337+ wallets onboarded
+                    Wallet, token, and community intelligence
                   </span>
                   <span className="flex items-center gap-1.5">
                     <ShieldCheck className="h-3 w-3 text-cyan-600" />
@@ -564,28 +628,32 @@ export default function Home() {
 
         {/* ── Footer ─────────────────────────────────────────────────────────── */}
         <footer className="border-t border-slate-800/50 py-10">
-          <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-5 text-xs text-slate-700">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-5 px-4 text-xs text-slate-700 sm:flex-row">
             <div className="flex items-center gap-2">
               <Logo className="h-5 w-5" />
               <span className="font-semibold text-slate-600">PumpMatch</span>
-              <span className="hidden sm:inline">· Season 1 · Powered by Solana</span>
+              <span className="hidden sm:inline">
+                · Behavioral Intelligence for Solana
+              </span>
             </div>
             <div className="flex items-center gap-6">
               <a
                 href="https://x.com/PumpMatch"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-slate-400 transition-colors"
+                className="transition-colors hover:text-slate-400"
               >
                 X / Twitter
               </a>
-              <Link href="/command-center" className="text-emerald-700 hover:text-emerald-500 transition-colors">
+              <Link
+                href="/command-center"
+                className="text-emerald-700 transition-colors hover:text-emerald-500"
+              >
                 Launch App →
               </Link>
             </div>
           </div>
         </footer>
-
       </main>
     </div>
   );

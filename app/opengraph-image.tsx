@@ -1,10 +1,9 @@
 import { ImageResponse } from "next/og";
 
-// Next.js App Router'da OG görseli üretmek için Edge çalışma zamanını kullanıyoruz
 export const runtime = "edge";
 
-// Standart OpenGraph Görsel Boyutları
-export const alt = "PumpMatch | The Trust Layer for Solana";
+export const alt = "PumpMatch | Behavioral Intelligence for Solana";
+
 export const size = {
   width: 1200,
   height: 630,
@@ -23,10 +22,12 @@ export default async function Image() {
           flexDirection: "column",
           alignItems: "flex-start",
           justifyContent: "center",
-          backgroundColor: "#020617", // slate-950
-          backgroundImage: "radial-gradient(circle at 80% 120%, rgba(16, 185, 129, 0.15), transparent 50%), radial-gradient(circle at 20% -20%, rgba(45, 212, 191, 0.15), transparent 50%)",
+          backgroundColor: "#020617",
+          backgroundImage:
+            "radial-gradient(circle at 80% 120%, rgba(16, 185, 129, 0.15), transparent 50%), radial-gradient(circle at 20% -20%, rgba(45, 212, 191, 0.15), transparent 50%)",
           padding: "80px",
           fontFamily: "sans-serif",
+          position: "relative",
         }}
       >
         {/* LOGO & BRAND */}
@@ -42,7 +43,7 @@ export default async function Image() {
               width: "48px",
               height: "48px",
               borderRadius: "12px",
-              background: "linear-gradient(135deg, #34d399, #14b8a6)", // emerald-400 to teal-500
+              background: "linear-gradient(135deg, #34d399, #14b8a6)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -56,7 +57,7 @@ export default async function Image() {
             style={{
               fontSize: "36px",
               fontWeight: 800,
-              color: "#f8fafc", // slate-50
+              color: "#f8fafc",
               letterSpacing: "-0.02em",
             }}
           >
@@ -75,27 +76,17 @@ export default async function Image() {
         >
           <span
             style={{
-              fontSize: "72px",
-              fontWeight: 900,
-              color: "#f8fafc",
-              letterSpacing: "-0.03em",
-              lineHeight: 1.1,
-            }}
-          >
-            The On-Chain
-          </span>
-          <span
-            style={{
               fontSize: "84px",
               fontWeight: 900,
               backgroundClip: "text",
               color: "transparent",
-              backgroundImage: "linear-gradient(to right, #34d399, #2dd4bf, #22d3ee)", // emerald-400 -> teal-400 -> cyan-400
+              backgroundImage:
+                "linear-gradient(to right, #34d399, #2dd4bf, #22d3ee)",
               letterSpacing: "-0.03em",
-              lineHeight: 1.1,
+              lineHeight: 1.05,
             }}
           >
-            Trust Layer
+            Behavioral Intelligence
           </span>
           <span
             style={{
@@ -110,18 +101,18 @@ export default async function Image() {
           </span>
         </div>
 
-        {/* SUB-TAGLINE (Sniper Note) */}
+        {/* SUB-TAGLINE */}
         <div
           style={{
             display: "flex",
-            fontSize: "32px",
+            fontSize: "30px",
             fontWeight: 500,
-            color: "#94a3b8", // slate-400
+            color: "#94a3b8",
             letterSpacing: "-0.01em",
             marginTop: "20px",
           }}
         >
-          Verifiable today, immutable tomorrow.
+          Explainable wallet and token intelligence.
         </div>
 
         {/* BOTTOM ACCENT BAR */}
