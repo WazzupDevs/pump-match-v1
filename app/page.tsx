@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Logo } from "@/components/ui/logo";
 import { Navbar } from "@/components/ui/navbar";
 import { Web3LoginButton } from "@/components/auth/Web3LoginButton";
@@ -20,11 +21,8 @@ import {
   Trophy,
   Crown,
   Medal,
+  Search,
 } from "lucide-react";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface LeaderboardRow {
   rank: number;
@@ -32,10 +30,6 @@ interface LeaderboardRow {
   score: number;
   tier: string;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Static data
-// ─────────────────────────────────────────────────────────────────────────────
 
 const FEATURES = [
   {
@@ -123,10 +117,6 @@ const TIER_COLORS: Record<string, string> = {
 
 const RANK_ICONS = [Crown, Medal, Trophy];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Leaderboard hook — fetches top 5 from trust_metrics + profiles
-// ─────────────────────────────────────────────────────────────────────────────
-
 interface RawLbRow {
   composite_score: number;
   tier: string;
@@ -169,6 +159,7 @@ function useTopOperators(limit = 5) {
     }
 
     fetch();
+
     return () => {
       alive = false;
     };
@@ -177,18 +168,22 @@ function useTopOperators(limit = 5) {
   return { rows, loading };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Page
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function Home() {
   const { ready, userId } = useSquadAuth();
   const isConnected = ready && !!userId;
   const { rows: leaderboard, loading: lbLoading } = useTopOperators(5);
+  const router = useRouter();
+  const [searchAddress, setSearchAddress] = useState("");
+
+  const handleAnalyze = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchAddress.trim()) {
+      router.push(`/profile/${searchAddress.trim()}`);
+    }
+  };
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-slate-950 font-sans text-slate-50">
-      {/* ── Navbar ───────────────────────────────────────────────────────────── */}
       <Navbar>
         <Link
           href="/command-center"
@@ -199,7 +194,6 @@ export default function Home() {
         </Link>
       </Navbar>
 
-      {/* ── Ambient background ────────────────────────────────────────────────── */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute inset-0 opacity-[0.022]"
@@ -215,70 +209,78 @@ export default function Home() {
       </div>
 
       <main id="main-content" className="relative">
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* HERO                                                                 */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <section className="flex min-h-screen flex-col items-center justify-center px-4 pt-24 pb-20 text-center">
-          {/* Live badge */}
-          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/8 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-400">
+        <section className="flex min-h-[88svh] flex-col items-center justify-center px-4 pt-28 pb-16 text-center">
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-400">
             <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
               <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping motion-reduce:animate-none" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
             </span>
-            Behavioral Intelligence · Solana · Live Now
+            Behavioral Intelligence · Solana
           </div>
 
-          {/* Main title */}
-          <h1 className="mx-auto max-w-4xl text-balance text-6xl font-black leading-none tracking-tighter sm:text-7xl lg:text-8xl xl:text-9xl">
+          <h1 className="mx-auto max-w-4xl text-balance text-4xl font-black leading-[0.95] tracking-tighter sm:text-5xl lg:text-6xl">
             <span
               className="bg-linear-to-br from-emerald-300 via-emerald-400 to-cyan-400 bg-clip-text text-transparent"
-              style={{ filter: "drop-shadow(0 0 60px rgba(16,185,129,0.45))" }}
+              style={{ filter: "drop-shadow(0 0 28px rgba(16,185,129,0.22))" }}
             >
-              Behavioral
-            </span>{" "}
-            <span
-              className="bg-linear-to-br from-violet-300 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent"
-              style={{ filter: "drop-shadow(0 0 60px rgba(168,85,247,0.35))" }}
-            >
-              Intelligence
+              Behavioral Intelligence
             </span>
             <br />
             <span className="text-slate-100">for Solana</span>
           </h1>
 
-          {/* Subtitle */}
-          <p className="mx-auto max-w-3xl text-base leading-relaxed text-slate-400 sm:text-xl">
-            PumpMatch turns raw on-chain activity into explainable wallet, token,
-            and community intelligence — building the foundation for reputation
-            and future high-signal coordination.
+          <p className="mx-auto mt-6 max-w-2xl text-sm leading-7 text-slate-400 sm:text-lg sm:leading-8">
+            PumpMatch turns raw on-chain activity into explainable wallet,
+            token, and community intelligence building the foundation for
+            reputation and future high-signal coordination.
           </p>
 
-          {/* ── Single CTA cluster — no duplicates ───────────────────────── */}
-          <div className="mt-10 flex flex-col items-center gap-3">
+          {/* Wallet search bar */}
+          <form
+            onSubmit={handleAnalyze}
+            className="mt-8 w-full max-w-md"
+          >
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-700/70 bg-slate-900/50 backdrop-blur-xl px-4 py-3 transition-[border-color,box-shadow] duration-200 focus-within:border-emerald-500/40 focus-within:shadow-[0_0_22px_rgba(16,185,129,0.12)]">
+              <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+              <input
+                type="text"
+                value={searchAddress}
+                onChange={(e) => setSearchAddress(e.target.value)}
+                placeholder="Enter a Solana wallet address"
+                className="min-w-0 flex-1 bg-transparent font-mono text-sm text-slate-200 placeholder:text-slate-600 outline-none"
+                spellCheck={false}
+                autoComplete="off"
+                aria-label="Solana wallet address to analyze"
+              />
+              <button
+                type="submit"
+                disabled={!searchAddress.trim()}
+                className="shrink-0 rounded-xl bg-emerald-500 px-4 py-1.5 text-xs font-bold text-slate-900 transition-[background-color,transform] duration-200 hover:bg-emerald-400 active:scale-95 motion-reduce:active:scale-100 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              >
+                Analyze
+              </button>
+            </div>
+          </form>
+
+          {/* Secondary: connect / go to Command Center */}
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <p className="text-xs text-slate-600">
+              {isConnected ? "Welcome back" : "Or connect your wallet"}
+            </p>
             {isConnected ? (
-              <>
-                <Link
-                  href="/command-center"
-                  className="group relative inline-flex items-center gap-2.5 rounded-2xl bg-emerald-500 px-9 py-4 text-lg font-black text-slate-900 transition-[background-color,box-shadow,transform] duration-200 hover:bg-emerald-400 hover:shadow-2xl hover:shadow-emerald-500/40 active:scale-95 motion-reduce:active:scale-100"
-                >
-                  Enter Command Center
-                  <span className="text-xl">🚀</span>
-                </Link>
-                <Web3LoginButton size="default" />
-              </>
+              <Link
+                href="/command-center"
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-2 text-sm font-bold text-emerald-300 transition-[background-color,border-color,box-shadow] duration-200 hover:bg-emerald-500/15 hover:border-emerald-500/50 hover:shadow-[0_0_16px_rgba(16,185,129,0.12)] active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              >
+                Enter Command Center
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </Link>
             ) : (
-              <Web3LoginButton size="lg" />
+              <Web3LoginButton size="default" />
             )}
-            <Link
-              href="/docs"
-              className="text-sm font-semibold text-slate-400 transition-colors hover:text-slate-200"
-            >
-              Read the Docs
-            </Link>
           </div>
 
-          {/* Value strip */}
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-600">
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-slate-600">
             {[
               "Explainable Signals",
               "Confidence-Aware Outputs",
@@ -286,26 +288,19 @@ export default function Home() {
               "Future Coordination Layer",
             ].map((t) => (
               <span key={t} className="flex items-center gap-1.5">
-                <ShieldCheck
-                  className="h-3 w-3 text-emerald-700"
-                  aria-hidden="true"
-                />
+                <ShieldCheck className="h-3 w-3 text-emerald-700" aria-hidden="true" />
                 {t}
               </span>
             ))}
           </div>
 
-          {/* Scroll hint */}
-          <div className="mt-16 opacity-30 motion-reduce:hidden">
+          <div className="mt-14 opacity-30 motion-reduce:hidden">
             <div className="mx-auto flex h-10 w-6 items-start justify-center rounded-full border border-slate-700 pt-2">
               <div className="h-2 w-1 rounded-full bg-slate-400 animate-bounce motion-reduce:animate-none" />
             </div>
           </div>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* LIVE LEADERBOARD — Top Operators Preview                            */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="border-y border-slate-800/60">
           <div className="mx-auto max-w-3xl px-4 py-20 sm:py-28">
             <div className="mb-10 text-center">
@@ -324,12 +319,9 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Glass table */}
             <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl">
-              {/* Top accent */}
               <div className="absolute inset-x-0 top-0 h-px bg-linear-to-r from-amber-500/0 via-amber-500/50 to-amber-500/0" />
 
-              {/* Header row */}
               <div className="grid grid-cols-[3rem_1fr_5rem_6rem] items-center border-b border-slate-800/70 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 sm:grid-cols-[3.5rem_1fr_6rem_7rem]">
                 <span>#</span>
                 <span>Operator</span>
@@ -337,7 +329,6 @@ export default function Home() {
                 <span className="text-right">Tier</span>
               </div>
 
-              {/* Rows */}
               {lbLoading ? (
                 <div className="px-5 py-10 text-center">
                   <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
@@ -363,7 +354,6 @@ export default function Home() {
                       key={entry.rank}
                       className="grid grid-cols-[3rem_1fr_5rem_6rem] items-center border-b border-slate-800/40 px-5 py-3.5 transition-colors hover:bg-slate-800/30 last:border-b-0 sm:grid-cols-[3.5rem_1fr_6rem_7rem]"
                     >
-                      {/* Rank */}
                       <span className="flex items-center">
                         {RankIcon ? (
                           <RankIcon
@@ -376,19 +366,16 @@ export default function Home() {
                         )}
                       </span>
 
-                      {/* Handle */}
                       <span className="truncate text-sm font-semibold text-slate-200">
                         {entry.handle.startsWith("Operator")
                           ? entry.handle
                           : `@${entry.handle}`}
                       </span>
 
-                      {/* Score */}
                       <span className="text-right text-sm font-bold tabular-nums text-emerald-400">
                         {entry.score}
                       </span>
 
-                      {/* Tier */}
                       <span
                         className={`text-right text-xs font-bold uppercase tracking-wider ${
                           TIER_COLORS[entry.tier] ?? "text-slate-500"
@@ -401,7 +388,6 @@ export default function Home() {
                 })
               )}
 
-              {/* Footer */}
               <div className="flex items-center justify-between border-t border-slate-800/70 px-5 py-3">
                 <span className="text-[10px] uppercase tracking-widest text-slate-700">
                   Season 1 · Solana Mainnet
@@ -418,9 +404,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* FEATURES — bento-style 3-col glass cards                            */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="mx-auto max-w-6xl px-4 py-28 sm:py-36">
           <div className="mb-16 text-center">
             <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-emerald-500">
@@ -450,17 +433,16 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
             {FEATURES.map((f) => {
               const Icon = f.icon;
+
               return (
                 <div
                   key={f.title}
                   className={`group relative overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/50 p-7 backdrop-blur-xl transition-colors duration-300 hover:border-slate-600/70 hover:shadow-xl ${f.glow}`}
                 >
-                  {/* Top accent line */}
                   <div
                     className={`absolute inset-x-0 top-0 h-px bg-linear-to-r ${f.topBar}`}
                   />
 
-                  {/* Icon row */}
                   <div className="mb-5 flex items-center justify-between">
                     <div
                       className={`inline-flex h-12 w-12 items-center justify-center rounded-xl ${f.iconBg}`}
@@ -507,9 +489,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* HOW IT WORKS                                                         */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="border-t border-slate-800/50 bg-slate-900/20">
           <div className="mx-auto max-w-5xl px-4 py-28 sm:py-36">
             <div className="mb-16 text-center">
@@ -529,6 +508,7 @@ export default function Home() {
 
               {HOW_IT_WORKS.map((s) => {
                 const Icon = s.icon;
+
                 return (
                   <div
                     key={s.step}
@@ -555,9 +535,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* FINAL CTA                                                            */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
         <section className="border-t border-slate-800/50">
           <div className="mx-auto max-w-3xl px-4 py-28 text-center sm:py-36">
             <div className="relative mx-auto max-w-2xl">
@@ -594,19 +571,11 @@ export default function Home() {
                     <Web3LoginButton size="lg" />
                   )}
 
-                  <Link
-                    href="/docs"
-                    className="text-sm font-semibold text-slate-400 transition-colors hover:text-slate-200"
-                  >
-                    Explore Docs
-                  </Link>
-
                   <p className="mt-1 text-xs text-slate-700">
                     No registration · Non-custodial · Open source
                   </p>
                 </div>
 
-                {/* Social proof */}
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-5 border-t border-slate-800/70 pt-8 text-xs text-slate-600">
                   <span className="flex items-center gap-1.5">
                     <Star className="h-3 w-3 text-amber-500" />
@@ -626,7 +595,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── Footer ─────────────────────────────────────────────────────────── */}
         <footer className="border-t border-slate-800/50 py-10">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-5 px-4 text-xs text-slate-700 sm:flex-row">
             <div className="flex items-center gap-2">
