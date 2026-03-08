@@ -442,6 +442,171 @@ function deriveBehavioralMetrics(core: OnchainCore): BehavioralMetrics | undefin
   };
 }
 
+function clamp0to100(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function confidenceLabelFromSample(sampleSize: number): ConfidenceLevel {
+  if (sampleSize >= 25) return "HIGH";
+  if (sampleSize >= 8) return "MEDIUM";
+  return "LOW";
+}
+
+function deriveStyleScores(core: OnchainCore, behavioral?: BehavioralMetrics) {
+  const pump = core.pumpStats;
+
+  const sniper = clamp0to100(
+    ((pump?.closedPositions ?? 0) >= 5 ? 35 : 0) +
+      ((behavioral?.tradeFreqScore ?? 0) * 0.45) +
+      ((behavioral?.jeetIndex ?? 0) * 0.30)
+  );
+
+  const scalper = clamp0to100(
+    ((behavioral?.jeetIndex ?? 0) * 0.55) +
+      ((behavioral?.tradeFreqScore ?? 0) * 0.35)
+  );
+
+  const conviction = clamp0to100(
+    (behavioral?.avgHoldingTimeSec
+      ? Math.min(100, behavioral.avgHoldingTimeSec / 1800)
+      : 0) *
+      0.55 +
+      Math.max(0, 100 - (behavioral?.jeetIndex ?? 0)) * 0.30 +
+      Math.max(0, 100 - (behavioral?.rugExposureIndex ?? 0)) * 0.15
+  );
+
+  const swing = clamp0to100(
+    conviction * 0.55 +
+      Math.max(0, 100 - (behavioral?.tradeFreqScore ?? 0)) * 0.20 +
+      Math.min(core.tokenDiversity * 4, 100) * 0.25
+  );
+
+  return {
+    sniper,
+    scalper,
+    swing,
+    conviction,
+  };
+}
+
+function deriveQualityScores(core: OnchainCore, behavioral?: BehavioralMetrics) {
+  const tx = Math.max(0, core.transactionCount);
+  const sampleQuality = Math.min(100, tx / 8);
+
+  const consistency = clamp0to100(
+    sampleQuality * 0.45 +
+      Math.max(0, 100 - (behavioral?.rugExposureIndex ?? 0)) * 0.30 +
+      Math.max(0, 100 - (behavioral?.jeetIndex ?? 0)) * 0.25
+  );
+
+  const pnlQuality = clamp0to100(
+    Math.max(0, 100 - (behavioral?.rugExposureIndex ?? 0)) * 0.55 +
+      Math.min(core.tokenDiversity * 5, 100) * 0.20 +
+      Math.min((core.portfolioValueUsd ?? 0) / 50, 100) * 0.25
+  );
+
+  const longevity = clamp0to100(
+    Math.min((core.approxWalletAgeDays ?? 0) / 3, 100) * 0.70 +
+      sampleQuality * 0.30
+  );
+
+  const overall = clamp0to100(
+    consistency * 0.4 + pnlQuality * 0.3 + longevity * 0.3
+  );
+
+  return {
+    consistency,
+    pnlQuality,
+    longevity,
+    overall,
+  };
+}
+
+function deriveRiskScores(core: OnchainCore, behavioral?: BehavioralMetrics) {
+  const churn = clamp0to100(behavioral?.jeetIndex ?? 0);
+  const rugExposure = clamp0to100(behavioral?.rugExposureIndex ?? 0);
+  const suspiciousness = clamp0to100(churn * 0.5 + rugExposure * 0.5);
+
+  return {
+    churn,
+    rugExposure,
+    suspiciousness,
+  };
+}
+
+function pickPrimaryStyle(styleScores: {
+  sniper: number;
+  scalper: number;
+  swing: number;
+  conviction: number;
+}) {
+  const entries = [
+    ["High-Frequency Sniper", styleScores.sniper],
+    ["Fast Churn Trader", styleScores.scalper],
+    ["Swing Trader", styleScores.swing],
+    ["Conviction Holder", styleScores.conviction],
+  ] as const;
+
+  return entries.sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function buildIntelligenceSummary(
+  primaryStyle: string,
+  qualityOverall: number,
+  suspiciousness: number,
+  confidence: ConfidenceLevel
+) {
+  let qualityText = "mixed quality";
+  if (qualityOverall >= 75) qualityText = "strong quality";
+  else if (qualityOverall >= 50) qualityText = "moderate quality";
+
+  let riskText = "elevated suspiciousness";
+  if (suspiciousness < 35) riskText = "low suspiciousness";
+  else if (suspiciousness < 60) riskText = "moderate suspiciousness";
+
+  return {
+    primaryStyle,
+    summary: `${primaryStyle} with ${qualityText}, ${riskText}, and ${confidence.toLowerCase()} confidence.`,
+  };
+}
+
+function buildCompatibilityTrustScore(
+  legacyScore: number,
+  qualityOverall: number,
+  suspiciousness: number,
+  confidenceOverall: number
+) {
+  return clamp0to100(
+    legacyScore * 0.45 +
+      qualityOverall * 0.30 +
+      Math.max(0, 100 - suspiciousness) * 0.15 +
+      confidenceOverall * 0.10
+  );
+}
+
+function buildIntelligenceFirstLabel(
+  primaryStyle: string,
+  qualityOverall: number,
+  suspiciousness: number,
+  confidence: ConfidenceLevel
+) {
+  const qualityText =
+    qualityOverall >= 75
+      ? "Strong Quality"
+      : qualityOverall >= 50
+      ? "Moderate Quality"
+      : "Early Quality";
+
+  const riskText =
+    suspiciousness < 35
+      ? "Low Risk"
+      : suspiciousness < 60
+      ? "Moderate Risk"
+      : "Elevated Risk";
+
+  return `${primaryStyle} · ${qualityText} · ${riskText} · ${confidence}`;
+}
+
 /**
  * V8 Stage 3: Enrich with DexScreener market data.
  * Fail-safe: never throws, never slows core pipeline.
@@ -530,6 +695,31 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
     // ── V8 Stage 2: Derive behavioral metrics ──
     const behavioral = deriveBehavioralMetrics(core);
 
+    const styleScores = deriveStyleScores(core, behavioral);
+    const qualityScores = deriveQualityScores(core, behavioral);
+    const riskScores = deriveRiskScores(core, behavioral);
+
+    const sampleSize =
+      core.pumpStats?.closedPositions ??
+      Math.max(0, Math.min(core.transactionCount, 100));
+
+    const confidenceLabel = confidenceLabelFromSample(sampleSize);
+    const confidenceOverall =
+      confidenceLabel === "HIGH"
+        ? 85
+        : confidenceLabel === "MEDIUM"
+        ? 60
+        : 35;
+
+    const primaryStyle = pickPrimaryStyle(styleScores);
+
+    const intelligenceSummary = buildIntelligenceSummary(
+      primaryStyle,
+      qualityScores.overall,
+      riskScores.suspiciousness,
+      confidenceLabel
+    );
+
     const { solBalance, transactionCount, fungibleTokens, totalNfts, totalAssets,
             tokenDiversity, activityCount, pumpStats, portfolioValueUsd } = core;
     let { scoreBreakdown, badges } = core;
@@ -546,9 +736,23 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       scoreBreakdown,
     };
 
-    const trustScore = scoreBreakdown.total;
+    const legacyScore = scoreBreakdown.total;
+
+    const trustScore = buildCompatibilityTrustScore(
+      legacyScore,
+      qualityScores.overall,
+      riskScores.suspiciousness,
+      confidenceOverall
+    );
+
     const score = trustScore;
-    const scoreLabel = trustScore >= 80 ? "Strong Activity" : trustScore >= 50 ? "Moderate Activity" : "Low Activity";
+
+    const scoreLabel = buildIntelligenceFirstLabel(
+      primaryStyle,
+      qualityScores.overall,
+      riskScores.suspiciousness,
+      confidenceLabel
+    );
 
     // Opt-In Network Architecture - Check if user is registered
     const isRegistered = await isUserRegistered(trimmed);
@@ -632,7 +836,49 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       pumpStats: normalizePumpStats(pumpStats),
       portfolioValueUsd,
       behavioral,
+      styleScores,
+      qualityScores,
+      riskScores,
+      intelligenceConfidence: {
+        overall: confidenceOverall,
+        label: confidenceLabel,
+        sampleSize,
+      },
+      intelligenceSummary,
     };
+
+    if (architectActive) {
+      walletAnalysis = {
+        ...walletAnalysis,
+        styleScores: {
+          sniper: 88,
+          scalper: 42,
+          swing: 80,
+          conviction: 91,
+        },
+        qualityScores: {
+          consistency: 95,
+          pnlQuality: 94,
+          longevity: 93,
+          overall: 94,
+        },
+        riskScores: {
+          churn: 8,
+          rugExposure: 4,
+          suspiciousness: 6,
+        },
+        intelligenceConfidence: {
+          overall: 95,
+          label: "HIGH",
+          sampleSize: 99,
+        },
+        intelligenceSummary: {
+          primaryStyle: "Conviction Holder",
+          summary:
+            "Conviction Holder with strong quality, low suspiciousness, and high confidence.",
+        },
+      };
+    }
 
     // ── V8 Stage 3: Enrich with market data (stub — no-op for now) ──
     walletAnalysis = await enrichWithMarketData(walletAnalysis, core);

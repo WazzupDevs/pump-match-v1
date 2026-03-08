@@ -1,28 +1,89 @@
 import { ImageResponse } from "next/og";
 import { analyzeWallet } from "@/app/actions/analyzeWallet";
-import type { WalletAnalysis } from "@/types";
 
-// Localhost kilitlenmesini (deadlock) önlemek için Node.js kullanıyoruz
 export const runtime = "nodejs";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-function clamp01(x: unknown) {
-  const n = typeof x === "number" && Number.isFinite(x) ? x : 0;
-  return Math.max(0, Math.min(100, n));
+type AnalysisResult = {
+  trustScore?: number;
+  scoreLabel?: string;
+  badges?: string[];
+  behavioral?: {
+    confidenceLabel?: string;
+  };
+};
+
+function clampScore(value?: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value as number)));
 }
 
-// Satori'de Linear Gradient bazen patladığı için Solid Stroke kullanıyoruz (Çok daha güvenli)
-function renderScoreRing(score: number, color: string) {
+function shortenAddress(address: string) {
+  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+}
+
+function badgeLabel(badge: string) {
+  switch (badge) {
+    case "diamond_hands":
+      return "Diamond Hands";
+    case "mega_jeet":
+      return "High Churn";
+    case "rug_magnet":
+      return "Rug Exposure";
+    case "whale":
+      return "Whale";
+    case "dev":
+      return "Builder";
+    case "og_wallet":
+      return "OG Wallet";
+    case "community_trusted":
+      return "Community Trusted";
+    default:
+      return badge;
+  }
+}
+
+function scoreTone(score: number) {
+  if (score >= 80) {
+    return {
+      ring: "#34d399",
+      text: "#a7f3d0",
+      glow: "rgba(52, 211, 153, 0.18)",
+    };
+  }
+
+  if (score >= 50) {
+    return {
+      ring: "#f59e0b",
+      text: "#fde68a",
+      glow: "rgba(245, 158, 11, 0.16)",
+    };
+  }
+
+  return {
+    ring: "#fb7185",
+    text: "#fecdd3",
+    glow: "rgba(251, 113, 133, 0.16)",
+  };
+}
+
+function renderRing(score: number, color: string) {
   const radius = 58;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
 
   return (
-    <svg width="140" height="140" viewBox="0 0 140 140" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="70" cy="70" r={radius} stroke="#1E293B" strokeWidth="12" />
+    <svg
+      width="140"
+      height="140"
+      viewBox="0 0 140 140"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <circle cx="70" cy="70" r={radius} stroke="#1e293b" strokeWidth="12" />
       <circle
         cx="70"
         cy="70"
@@ -31,21 +92,38 @@ function renderScoreRing(score: number, color: string) {
         strokeWidth="12"
         strokeLinecap="round"
         strokeDasharray={`${circumference} ${circumference}`}
-        strokeDashoffset={`${offset}`}
+        strokeDashoffset={offset}
         transform="rotate(-90 70 70)"
       />
     </svg>
   );
 }
 
-export default async function OG({ params }: { params: { address: string } }) {
-  const address = (params.address ?? "").trim();
+export default async function Image({
+  params,
+}: {
+  params: Promise<{ address: string }>;
+}) {
+  const { address: rawAddress } = await params;
+  const address = (rawAddress ?? "").trim();
 
-  // Satori Kuralı: Birden çok eleman yok ama flex koymak her zaman güvenlidir.
   if (!BASE58_RE.test(address)) {
     return new ImageResponse(
       (
-        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#020617", color: "#ef4444", fontSize: 48, fontFamily: "sans-serif", fontWeight: 800 }}>
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#020617",
+            color: "#f87171",
+            fontSize: 42,
+            fontWeight: 800,
+            fontFamily: "sans-serif",
+          }}
+        >
           INVALID ADDRESS
         </div>
       ),
@@ -53,149 +131,242 @@ export default async function OG({ params }: { params: { address: string } }) {
     );
   }
 
-  let analysis: WalletAnalysis | null = null;
-  
+  let analysis: AnalysisResult | null = null;
+
   try {
     const result = await analyzeWallet(address);
-    analysis = result.walletAnalysis;
+    analysis = (result?.walletAnalysis ?? null) as AnalysisResult | null;
   } catch {
-    // Sessiz Fail
+    analysis = null;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const isUnavailable = !analysis;
-  
-  const trust = clamp01(analysis?.trustScore);
-  const badges: string[] = analysis?.badges ?? [];
-  const pump = analysis?.pumpStats ?? null;
-
-  const isDiamond = badges.includes("diamond_hands");
-  const isJeet = badges.includes("mega_jeet");
-  const isRug = badges.includes("rug_magnet");
-
-  const title = isUnavailable
-    ? "DATA UNAVAILABLE"
-    : isDiamond
-      ? "DIAMOND HANDS 💎"
-      : isJeet
-        ? "MEGA JEET 🐟"
-        : isRug
-          ? "RUG MAGNET ☠️"
-          : "ON-CHAIN PROFILE";
-
-  const titleColor = isUnavailable ? "#64748B" : isDiamond ? "#10B981" : isJeet ? "#F43F5E" : isRug ? "#A855F7" : "#E2E8F0";
-
-  const jeetScore = clamp01(pump?.jeetScore);
-  const rugScore = clamp01(pump?.rugMagnetScore);
-
-  // Satori uyumlu temiz arkaplan
-  const bg = `linear-gradient(180deg, #020617 0%, #0B1121 50%, #0f172a 100%)`;
+  const score = clampScore(analysis?.trustScore);
+  const tone = scoreTone(score);
+  const badges = (analysis?.badges ?? []).slice(0, 3).map(badgeLabel);
+  const confidence =
+    analysis?.behavioral?.confidenceLabel ??
+    analysis?.scoreLabel ??
+    "Public behavioral surface";
 
   return new ImageResponse(
     (
-      <div style={{ width: "100%", height: "100%", position: "relative", display: "flex", flexDirection: "column", background: bg, padding: 64, fontFamily: "sans-serif", color: "#E2E8F0" }}>
-        
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-          <div style={{ fontSize: 28, letterSpacing: 4, color: "#94A3B8", fontWeight: 800, display: "flex" }}>
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          background:
+            "linear-gradient(180deg, #020617 0%, #08111f 55%, #0f172a 100%)",
+          padding: "56px",
+          fontFamily: "sans-serif",
+          color: "#e2e8f0",
+          position: "relative",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "radial-gradient(circle at top, rgba(16,185,129,0.10), transparent 26%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.08), transparent 18%)",
+          }}
+        />
+
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              fontSize: 24,
+              letterSpacing: 3,
+              fontWeight: 800,
+              color: "#94a3b8",
+            }}
+          >
             PUMPMATCH
           </div>
-          <div style={{ fontSize: 22, color: "#64748B", fontFamily: "monospace", border: "1px solid #1E293B", padding: "8px 16px", borderRadius: 12, background: "rgba(15,23,42,0.5)", display: "flex" }}>
-            {address.slice(0, 6)}…{address.slice(-6)}
+
+          <div
+            style={{
+              display: "flex",
+              padding: "10px 16px",
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.04)",
+              fontSize: 18,
+              color: "#cbd5e1",
+              fontFamily: "monospace",
+            }}
+          >
+            {shortenAddress(address)}
           </div>
         </div>
 
-        {/* Title & Badges */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 24, width: "100%" }}>
-          <div style={{ fontSize: 64, fontWeight: 900, color: titleColor, letterSpacing: "-0.02em", display: "flex" }}>
-            {title}
-          </div>
-          {!isUnavailable && (
-            <div style={{ display: "flex", gap: 12 }}>
-              {badges.includes("whale") && <div style={{ background: "#3B82F633", border: "1px solid #3B82F666", color: "#60A5FA", padding: "6px 16px", borderRadius: 20, fontSize: 16, fontWeight: 700, display: "flex" }}>WHALE</div>}
-              {badges.includes("dev") && <div style={{ background: "#47556955", border: "1px solid #64748B88", color: "#CBD5E1", padding: "6px 16px", borderRadius: 20, fontSize: 16, fontWeight: 700, display: "flex" }}>BUILDER</div>}
-              {badges.includes("community_trusted") && <div style={{ background: "#EAB30833", border: "1px solid #EAB30866", color: "#FDE047", padding: "6px 16px", borderRadius: 20, fontSize: 16, fontWeight: 700, display: "flex" }}>TRUSTED</div>}
-            </div>
-          )}
-        </div>
-
-        {/* Ana İçerik Kutuları */}
-        <div style={{ display: "flex", gap: 32, marginTop: 40, flex: 1, width: "100%" }}>
-          
-          {/* Trust Score Kutusu */}
-          <div style={{ flex: 0.8, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", background: "rgba(15,23,42,0.8)", border: `2px solid ${titleColor}33`, borderRadius: 32, padding: 32, position: "relative" }}>
-            {!isUnavailable ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
-                {/* ⚠️ ZIRH: Satori'nin sevmediği inset: 0 yerine top/left/right/bottom kullanıyoruz */}
-                <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {renderScoreRing(trust, titleColor)}
-                </div>
-                {/* ⚠️ ZIRH: zIndex artık "10px" değil, sadece rakam olan 10! */}
-                <div style={{ fontSize: 110, fontWeight: 900, color: "#F8FAFC", zIndex: 10, display: "flex" }}>
-                  {Math.round(trust)}
-                </div>
-                <div style={{ fontSize: 20, color: titleColor, textTransform: "uppercase", letterSpacing: 2, marginTop: 16, fontWeight: 700, display: "flex" }}>
-                  Trust Score
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontSize: 32, color: "#64748B", fontWeight: 700, display: "flex" }}>NO DATA</div>
-            )}
-          </div>
-
-          {/* Pump DNA Kutusu */}
-          <div style={{ flex: 1.2, display: "flex", flexDirection: "column", background: "rgba(15,23,42,0.8)", border: `2px solid ${titleColor}33`, borderRadius: 32, padding: 40, gap: 24 }}>
-            <div style={{ fontSize: 28, color: "#F8FAFC", fontWeight: 800, borderBottom: `2px solid ${titleColor}33`, paddingBottom: 16, display: "flex" }}>
-              Pump.fun DNA
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 40,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxWidth: 700,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                marginBottom: 14,
+                fontSize: 14,
+                textTransform: "uppercase",
+                letterSpacing: 3,
+                color: "#86efac",
+              }}
+            >
+              Public Behavioral Analysis
             </div>
 
-            {!isUnavailable ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 22, color: "#CBD5E1", width: "100%" }}>
-                    <span style={{ display: "flex" }}>Jeet Behavior</span>
-                    <span style={{ color: "#F43F5E", fontWeight: 800, display: "flex" }}>{Math.round(jeetScore)}/100</span>
-                  </div>
-                  <div style={{ width: "100%", height: 16, background: "#0F172A", borderRadius: 8, overflow: "hidden", border: "1px solid #334155", display: "flex" }}>
-                    <div style={{ width: `${jeetScore}%`, height: "100%", background: "#F43F5E", display: "flex" }} />
-                  </div>
-                </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                fontSize: 62,
+                lineHeight: 1,
+                fontWeight: 800,
+                letterSpacing: -2,
+                color: "#f8fafc",
+              }}
+            >
+              <span>Behavioral Signals</span>
+              <span style={{ color: "#94a3b8" }}>for Solana</span>
+            </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 22, color: "#CBD5E1", width: "100%" }}>
-                    <span style={{ display: "flex" }}>Rug Exposure</span>
-                    <span style={{ color: "#A855F7", fontWeight: 800, display: "flex" }}>{Math.round(rugScore)}/100</span>
-                  </div>
-                  <div style={{ width: "100%", height: 16, background: "#0F172A", borderRadius: 8, overflow: "hidden", border: "1px solid #334155", display: "flex" }}>
-                    <div style={{ width: `${rugScore}%`, height: "100%", background: "#A855F7", display: "flex" }} />
-                  </div>
-                </div>
+            <div
+              style={{
+                display: "flex",
+                marginTop: 18,
+                fontSize: 24,
+                lineHeight: 1.5,
+                color: "#94a3b8",
+              }}
+            >
+              Explainable public signals for wallet behavior, visible reputation
+              surfaces, and confidence-aware analysis.
+            </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, paddingTop: 16, borderTop: "1px solid #334155", width: "100%" }}>
-                  <div style={{ fontSize: 22, color: "#94A3B8", display: "flex", gap: 8 }}>
-                    <span>Tokens:</span> <span style={{ color: "#F8FAFC", fontWeight: 800 }}>{pump?.pumpMintsTouched ?? 0}</span>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                marginTop: 24,
+              }}
+            >
+              {(badges.length > 0 ? badges : ["Public Signals", "Masked Identity", confidence]).map(
+                (item) => (
+                  <div
+                    key={item}
+                    style={{
+                      display: "flex",
+                      padding: "10px 14px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.04)",
+                      fontSize: 16,
+                      color: "#cbd5e1",
+                    }}
+                  >
+                    {item}
                   </div>
-                  <div style={{ fontSize: 22, color: "#94A3B8", display: "flex", gap: 8 }}>
-                    <span>Closed:</span> <span style={{ color: "#F8FAFC", fontWeight: 800 }}>{pump?.closedPositions ?? 0}</span>
-                  </div>
-                </div>
+                )
+              )}
+            </div>
+          </div>
+
+          <div
+            style={{
+              position: "relative",
+              width: 220,
+              height: 220,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                width: 180,
+                height: 180,
+                borderRadius: 999,
+                background: tone.glow,
+                filter: "blur(28px)",
+              }}
+            />
+            <div style={{ position: "relative", display: "flex" }}>
+              {renderRing(score, tone.ring)}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 54,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  color: tone.text,
+                }}
+              >
+                {score}
               </div>
-            ) : (
-              <div style={{ fontSize: 24, color: "#64748B", marginTop: "auto", marginBottom: "auto", textAlign: "center", display: "flex", justifyContent: "center" }}>
-                Analysis data is currently unavailable.
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  color: "#94a3b8",
+                }}
+              >
+                Public Score
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", alignItems: "flex-end", width: "100%" }}>
-           <div style={{ fontSize: 20, color: titleColor, opacity: 0.8, fontWeight: 600, display: "flex" }}>
-            pumpmatch.com/profile
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: 16,
+            color: "#64748b",
+          }}
+        >
+          <div style={{ display: "flex" }}>
+            PumpMatch · Behavioral Intelligence for Solana
           </div>
-          <div style={{ fontSize: 18, color: "#475569", fontFamily: "monospace", display: "flex" }}>
-            {today}
-          </div>
+          <div style={{ display: "flex" }}>{confidence}</div>
         </div>
       </div>
     ),

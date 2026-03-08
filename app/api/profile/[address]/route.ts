@@ -73,6 +73,12 @@ export async function GET(
             confidence: walletAnalysis.pumpStats.confidence ?? "LOW",
           }
         : null,
+
+      styleScores: walletAnalysis.styleScores ?? null,
+      qualityScores: walletAnalysis.qualityScores ?? null,
+      riskScores: walletAnalysis.riskScores ?? null,
+      intelligenceConfidence: walletAnalysis.intelligenceConfidence ?? null,
+      intelligenceSummary: walletAnalysis.intelligenceSummary ?? null,
     };
 
     return NextResponse.json(publicResponse, {

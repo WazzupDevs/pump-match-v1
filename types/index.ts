@@ -143,6 +143,12 @@ export type WalletAnalysis = {
   behavioral?: BehavioralMetrics;
   // V8 Analysis Engine: market data from DexScreener (optional, may be absent in cached responses)
   marketData?: { topTokens: MarketSnapshot[] };
+  // Intelligence Core: optional multi-axis scores and summary
+  styleScores?: StyleScores;
+  qualityScores?: QualityScores;
+  riskScores?: RiskScores;
+  intelligenceConfidence?: IntelligenceConfidence;
+  intelligenceSummary?: IntelligenceSummary;
 };
 
 // Re-export MarketSnapshot from types for convenience (canonical definition in lib/market-data.ts)
@@ -161,6 +167,42 @@ export type BehavioralMetrics = {
   avgHoldingTimeSec?: number;  // median holding time in seconds (proxy from pumpStats)
   tradeFreqScore?: number;     // 0-100: trade frequency relative to wallet age
   confidenceLabel: string;     // describes data sources used for derivation
+};
+
+// Intelligence Core: multi-axis style scoring
+export type StyleScores = {
+  sniper: number;
+  scalper: number;
+  swing: number;
+  conviction: number;
+};
+
+// Intelligence Core: quality metrics
+export type QualityScores = {
+  consistency: number;
+  pnlQuality: number;
+  longevity: number;
+  overall: number;
+};
+
+// Intelligence Core: risk / suspiciousness signals
+export type RiskScores = {
+  churn: number;
+  rugExposure: number;
+  suspiciousness: number;
+};
+
+// Intelligence Core: confidence metadata for scores
+export type IntelligenceConfidence = {
+  overall: number;
+  label: "LOW" | "MEDIUM" | "HIGH";
+  sampleSize: number;
+};
+
+// Intelligence Core: human-readable summary
+export type IntelligenceSummary = {
+  primaryStyle: string;
+  summary: string;
 };
 
 export type MatchProfile = {
