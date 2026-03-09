@@ -1,5 +1,8 @@
 import "server-only";
 
+// Legacy / coordination-layer match engine.
+// Consumes WalletAnalysis and UserProfile metadata to produce matches, but is
+// not part of the canonical Intelligence Core v2 scoring surface.
 import type { Badge, ConfidenceBreakdown, MatchProfile, MatchReason, SocialProof, UserIntent, WalletAnalysis } from "@/types";
 
 /**

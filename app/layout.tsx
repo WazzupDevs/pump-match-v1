@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { WalletProviders } from "@/components/providers";
 import { SquadProvider } from "@/components/providers/SquadProvider";
@@ -25,7 +25,6 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   ),
   alternates: { canonical: "/" },
-  themeColor: "#020617",
   openGraph: {
     type: "website",
     url: "/",
@@ -48,6 +47,10 @@ export const metadata: Metadata = {
     images: ["/opengraph-image"],
   },
   robots: { index: true, follow: true },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#020617",
 };
 
 export default function RootLayout({

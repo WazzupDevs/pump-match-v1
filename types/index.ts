@@ -1,3 +1,15 @@
+export type {
+  ModelVersion,
+  ScoreWindow,
+  VisibilityMode,
+  ConfidenceTier,
+  BehavioralFeatures,
+  ScoreSnapshot,
+  IntelligenceReport,
+  WalletReceipt,
+  ArenaBridgeFields,
+} from "./intelligence";
+
 export type BadgeId =
   | "whale"
   | "dev"
@@ -114,14 +126,19 @@ export type SocialLinks = {
   telegram?: string;
 };
 
+// Intelligence Core V2: wallet-level intelligence snapshot (coordination-agnostic).
+// Coordination metadata (like intent) lives on UserProfile, not here.
 export type WalletAnalysis = {
   address: string;
   solBalance: number;
   tokenCount: number;
   nftCount: number;
   assetCount: number;
+  /** @deprecated Legacy scalar score; v2 should prefer intelligenceReport.snapshot. */
   score: number;
+  /** @deprecated Legacy label; v2 should prefer intelligenceReport.snapshot.summary.scoreLabel. */
   scoreLabel: string;
+  /** @deprecated Legacy trust score; v2 should prefer intelligenceReport.legacyTrustScore. */
   trustScore: number;
   badges: BadgeId[];
   transactionCount: number;
@@ -130,8 +147,11 @@ export type WalletAnalysis = {
   // Pump Match - Calculated scores
   systemScore: number; // System rozetlerinin toplamı
   socialScore: number; // Decay uygulanmış sosyal skor
-  // v2: Intent Layer
-  intent?: UserIntent; // Nullable - Kullanıcı seçmediyse undefined
+  /**
+   * @deprecated Coordination-layer intent. Canonical location is UserProfile.intent,
+   * not the wallet intelligence surface. Kept for backward compatibility only.
+   */
+  intent?: UserIntent;
   // Opt-In Network Architecture
   isRegistered: boolean; // Is this wallet in the network registry?
   // Production Grade: Wallet age in days (from first activity, NOT creation date)
@@ -149,6 +169,8 @@ export type WalletAnalysis = {
   riskScores?: RiskScores;
   intelligenceConfidence?: IntelligenceConfidence;
   intelligenceSummary?: IntelligenceSummary;
+  // Intelligence Core V2: canonical report snapshot (Phase 2+)
+  intelligenceReport?: IntelligenceReport;
 };
 
 // Re-export MarketSnapshot from types for convenience (canonical definition in lib/market-data.ts)
@@ -166,7 +188,16 @@ export type BehavioralMetrics = {
   rugExposureIndex: number;    // 0-100: higher = more rug exposure
   avgHoldingTimeSec?: number;  // median holding time in seconds (proxy from pumpStats)
   tradeFreqScore?: number;     // 0-100: trade frequency relative to wallet age
-  confidenceLabel: string;     // describes data sources used for derivation
+  /**
+   * Canonical V2 name: describes which evidence sources contributed
+   * to this behavioral profile (e.g. "Helius Enhanced TX + Pump Simulation").
+   */
+  evidenceSources: string;
+  /**
+   * @deprecated Use evidenceSources instead.
+   * Kept temporarily as backward-compat alias for existing callers.
+   */
+  confidenceLabel?: string;
 };
 
 // Intelligence Core: multi-axis style scoring
@@ -286,7 +317,12 @@ export type NetworkAgent = {
 export type AnalyzeWalletResponse = {
   analysis: AnalyzeWalletResult;
   walletAnalysis: WalletAnalysis; // Pump Match - Full analysis sent to client
-  matches: MatchProfile[];
+  /**
+   * @deprecated Preview matches are a legacy coordination layer concern and
+   * are not part of the canonical Intelligence Core v2 response. This field
+   * is optional and may be omitted when matches are not requested.
+   */
+  matches?: MatchProfile[];
 };
 
 // ──────────────────────────────────────────────────────────────

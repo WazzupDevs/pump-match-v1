@@ -1,7 +1,22 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import type { UserProfile, NetworkAgent, MatchProfile, SearchFilters, Role, Badge, SocialProof, IdentityState, UserIntent, SocialLinks } from '@/types';
+import { supabaseServer } from "@/lib/supabase/server";
+import type {
+  UserProfile,
+  NetworkAgent,
+  MatchProfile,
+  SearchFilters,
+  Role,
+  Badge,
+  SocialProof,
+  IdentityState,
+  UserIntent,
+  SocialLinks,
+  VisibilityMode,
+  ScoreSnapshot,
+  ArenaBridgeFields,
+} from "@/types";
 
 // Strongly-typed input for upsertUser (replaces Partial<Record<string, unknown>>)
 type UpsertUserData = {
@@ -17,7 +32,16 @@ type UpsertUserData = {
   joined_at?: number;
   match_filters?: { minTrustScore?: number };
   social_links?: SocialLinks;
+   // Intelligence Core V2 bridge fields (added in Phase 2A; optional until wired)
+  latest_snapshot_id?: string;
+  visibility_mode?: VisibilityMode;
 };
+
+// RLS-applied server-side read client (anon key, policies enforced)
+const readClient = () => supabaseServer;
+
+// Privileged write client (service role key, bypasses RLS)
+const writeClient = () => getSupabaseAdmin();
 
 const VALID_ROLES: Role[] = ["Dev", "Artist", "Marketing", "Whale", "Community"];
 
@@ -73,8 +97,8 @@ function mapDbUserToProfile(dbUser: Record<string, unknown>): UserProfile {
 // ── 1. TEMEL CRUD İŞLEMLERİ ──
 
 export async function getUserProfile(wallet: string): Promise<UserProfile | null> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('users')
     .select('*')
     .eq('wallet_address', wallet)
@@ -86,8 +110,8 @@ export async function getUserProfile(wallet: string): Promise<UserProfile | null
 
 // isUserRegistered: lightweight existence check — avoids SELECT * overhead
 export async function isUserRegistered(wallet: string): Promise<boolean> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('users')
     .select('id, is_opted_in')
     .eq('wallet_address', wallet)
@@ -112,6 +136,8 @@ export async function upsertUser(wallet: string, partialData: UpsertUserData) {
     joined_at: partialData.joined_at,
     match_filters: partialData.match_filters,
     social_links: partialData.social_links,
+    latest_snapshot_id: partialData.latest_snapshot_id,
+    visibility_mode: partialData.visibility_mode,
     last_active_at: Date.now(),
   };
 
@@ -122,8 +148,8 @@ export async function upsertUser(wallet: string, partialData: UpsertUserData) {
     }
   }
 
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = writeClient();
+  const { data, error } = await supabase
     .from('users')
     .upsert(dbData, { onConflict: 'wallet_address' })
     .select()
@@ -215,8 +241,8 @@ export async function findMatches(
     'joined_at', 'identity_state', 'match_filters', 'last_match_snapshot_at', 'social_links',
   ].join(', ');
 
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('users')
     .select(MATCH_COLUMNS)
     .eq('is_opted_in', true)
@@ -236,8 +262,8 @@ export async function findMatches(
 
 // Snapshot güncelleme
 export async function updateMatchSnapshot(wallet: string, matches: MatchProfile[]) {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { error } = await supabaseAdmin
+  const supabase = writeClient();
+  const { error } = await supabase
     .from('users')
     .update({
       cached_matches: matches,
@@ -251,6 +277,73 @@ export async function updateMatchSnapshot(wallet: string, matches: MatchProfile[
   }
 }
 
+/**
+ * Insert a canonical intelligence score snapshot for a wallet.
+ * Returns the generated snapshot id on success, or null on failure.
+ */
+export async function insertScoreSnapshot(
+  walletAddress: string,
+  snapshot: ScoreSnapshot,
+): Promise<string | null> {
+  const supabase = writeClient();
+
+  const { data, error } = await supabase
+    .from("score_snapshots")
+    .insert({
+      wallet_address: walletAddress,
+      model_version: snapshot.modelVersion,
+      score_window: snapshot.scoreWindow,
+      style: snapshot.style,
+      quality: snapshot.quality,
+      risk: snapshot.risk,
+      confidence: snapshot.confidence,
+      summary: snapshot.summary,
+      sample_size: snapshot.sampleSize,
+      computed_at: snapshot.computedAt,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error("[insertScoreSnapshot] Supabase insert error:", error);
+    return null;
+  }
+
+  return (data as { id: string }).id;
+}
+
+/**
+ * Update denormalized Intelligence Core bridge fields on trust_metrics.
+ * NOTE: score_snapshots remains the source of truth; this is a convenience view for Arena.
+ */
+export async function updateArenaBridge(
+  userId: string,
+  fields: ArenaBridgeFields,
+): Promise<void> {
+  const supabase = writeClient();
+
+  const { latestSnapshotId, primaryStyle, qualityOverall, suspiciousness, confidenceTier, scoreLabel } =
+    fields;
+
+  const { error } = await supabase
+    .from("trust_metrics")
+    .update({
+      latest_snapshot_id: latestSnapshotId,
+      primary_style: primaryStyle,
+      quality_overall: qualityOverall,
+      suspiciousness,
+      confidence_tier: confidenceTier,
+      score_label: scoreLabel,
+    })
+    .eq("user_id", userId);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error("[updateArenaBridge] Supabase update error:", error);
+  }
+}
+
 // ── 3. ENDORSEMENT SYSTEM ──
 
 /**
@@ -261,8 +354,8 @@ export async function addEndorsement(
   fromWallet: string,
   toWallet: string,
 ): Promise<{ success: boolean; alreadyEndorsed: boolean }> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { error } = await supabaseAdmin
+  const supabase = writeClient();
+  const { error } = await supabase
     .from('endorsements')
     .insert({ from_wallet: fromWallet, to_wallet: toWallet });
 
@@ -280,8 +373,8 @@ export async function addEndorsement(
 
 /** Get total endorsement count for a single wallet. */
 export async function getEndorsementCount(wallet: string): Promise<number> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { count, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { count, error } = await supabase
     .from('endorsements')
     .select('id', { count: 'exact', head: true })
     .eq('to_wallet', wallet);
@@ -292,8 +385,8 @@ export async function getEndorsementCount(wallet: string): Promise<number> {
 
 /** Check if fromWallet has already endorsed toWallet. */
 export async function hasEndorsed(fromWallet: string, toWallet: string): Promise<boolean> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('endorsements')
     .select('id')
     .eq('from_wallet', fromWallet)
@@ -310,8 +403,8 @@ export async function hasEndorsed(fromWallet: string, toWallet: string): Promise
 export async function getEndorsementCounts(wallets: string[]): Promise<Map<string, number>> {
   if (wallets.length === 0) return new Map();
 
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('endorsements')
     .select('to_wallet')
     .in('to_wallet', wallets);
@@ -336,8 +429,8 @@ export async function getMyEndorsements(
 ): Promise<Set<string>> {
   if (toWallets.length === 0) return new Set();
 
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('endorsements')
     .select('to_wallet')
     .eq('from_wallet', fromWallet)
@@ -359,8 +452,8 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
   const limit  = Math.min(filters.limit  ?? 50, 100); // cap at 100
   const offset = filters.offset ?? 0;
 
-  const supabaseAdmin = getSupabaseAdmin();
-  let query = supabaseAdmin
+  const supabase = readClient();
+  let query = supabase
     .from('users')
     .select(SEARCH_COLUMNS)
     .eq('is_opted_in', true); // Only search opted-in agents
@@ -410,8 +503,8 @@ export async function searchNetwork(filters: SearchFilters): Promise<NetworkAgen
 
 /** Get all squads a wallet address belongs to. */
 export async function getMySquads(walletAddress: string): Promise<string[]> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('squad_members')
     .select('project_id')
     .eq('wallet_address', walletAddress)
@@ -425,8 +518,8 @@ export async function getMySquads(walletAddress: string): Promise<string[]> {
 export async function getSquadMemberCounts(projectIds: string[]): Promise<Map<string, number>> {
   if (projectIds.length === 0) return new Map();
 
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
+  const supabase = readClient();
+  const { data, error } = await supabase
     .from('squad_members')
     .select('project_id')
     .in('project_id', projectIds)
@@ -449,8 +542,8 @@ export async function getSquadMemberCounts(projectIds: string[]): Promise<Map<st
  * but the user is no longer visible in the network or matched.
  */
 export async function leaveNetwork(wallet: string): Promise<boolean> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { error } = await supabaseAdmin
+  const supabase = writeClient();
+  const { error } = await supabase
     .from('users')
     .update({
       is_opted_in: false,

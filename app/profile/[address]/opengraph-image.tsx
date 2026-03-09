@@ -251,7 +251,7 @@ export default async function Image({
                 color: "#f8fafc",
               }}
             >
-              <span>Behavioral Signals</span>
+              <span>Behavioral Intelligence</span>
               <span style={{ color: "#94a3b8" }}>for Solana</span>
             </div>
 
@@ -264,8 +264,7 @@ export default async function Image({
                 color: "#94a3b8",
               }}
             >
-              Explainable public signals for wallet behavior, visible reputation
-              surfaces, and confidence-aware analysis.
+              Explainable public signals for wallet behavior, quality, risk, and confidence.
             </div>
 
             <div
@@ -347,7 +346,7 @@ export default async function Image({
                   color: "#94a3b8",
                 }}
               >
-                Public Score
+                Public Score Surface
               </div>
             </div>
           </div>

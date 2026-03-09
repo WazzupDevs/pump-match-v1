@@ -69,26 +69,26 @@ function RiskBandBadge({ band, score }: { band: string, score: number }) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Trust Breakdown Panel
+// Signal / trust breakdown panel (legacy coordination layer)
 // ──────────────────────────────────────────────────────────────
 function TrustBreakdownPanel({ project }: { project: PowerSquadProject }) {
   const calculateWidth = (score: number) => `${Math.min(Math.max((score / 1000) * 100, 0), 100)}%`;
   const hasSquad = project.memberCount > 0;
 
   return (
-    <div className="pt-4 pb-3 px-3 mt-4 border-t border-slate-800/60 space-y-4 bg-slate-950/30 border border-slate-800/60 rounded-2xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
+    <div className="pt-4 pb-3 px-3 mt-4 border-t border-slate-800/60 space-y-4 bg-slate-950/30 rounded-2xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Info className="h-3.5 w-3.5 text-slate-500" /> Trust Underwriting Engine
+          <Info className="h-3.5 w-3.5 text-slate-500" /> Signal Underwriting
         </h4>
         <span className="text-[10px] text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded-full">
-          {hasSquad ? "60/40 Hybrid Algorithm" : "100% Founder Trust"}
+          {hasSquad ? "Founder + Squad Signal Mix" : "Founder Signal Only"}
         </span>
       </div>
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-slate-400">Founder Trust ({(project.dev_tier || 'Newbie')})</span>
+          <span className="text-slate-400">Founder Signal ({(project.dev_tier || 'Newbie')})</span>
           <span className="font-mono font-medium text-slate-200">{project.dev_trust_score} / 1000</span>
         </div>
         <div className="h-1.5 w-full bg-slate-800/80 rounded-full overflow-hidden">
@@ -143,9 +143,9 @@ function RankIcon({ rank, isExiled }: { rank: number; isExiled?: boolean }) {
       </div>
     );
   }
-  if (rank === 1) return <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-yellow-300 via-amber-400 to-yellow-600 shadow-lg shadow-yellow-500/50 ring-2 ring-yellow-400/40"><Crown className="h-5 w-5 text-yellow-950" /></div>;
-  if (rank === 2) return <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-slate-200 via-slate-300 to-slate-400 shadow-lg shadow-slate-400/40 ring-2 ring-slate-300/30"><Trophy className="h-4.5 w-4.5 text-slate-700" /></div>;
-  if (rank === 3) return <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 via-amber-500 to-orange-600 shadow-lg shadow-orange-500/40 ring-2 ring-orange-400/30"><Medal className="h-4.5 w-4.5 text-orange-100" /></div>;
+  if (rank === 1) return <div className="flex items-center justify-center w-10 h-10 rounded-full bg-linear-to-br from-yellow-300 via-amber-400 to-yellow-600 shadow-lg shadow-yellow-500/50 ring-2 ring-yellow-400/40"><Crown className="h-5 w-5 text-yellow-950" /></div>;
+  if (rank === 2) return <div className="flex items-center justify-center w-10 h-10 rounded-full bg-linear-to-br from-slate-200 via-slate-300 to-slate-400 shadow-lg shadow-slate-400/40 ring-2 ring-slate-300/30"><Trophy className="h-4.5 w-4.5 text-slate-700" /></div>;
+  if (rank === 3) return <div className="flex items-center justify-center w-10 h-10 rounded-full bg-linear-to-br from-orange-400 via-amber-500 to-orange-600 shadow-lg shadow-orange-500/40 ring-2 ring-orange-400/30"><Medal className="h-4.5 w-4.5 text-orange-100" /></div>;
   
   return (
     <div className="flex items-center justify-center w-10 h-10 rounded-full border border-slate-700/60 bg-slate-800/70">
@@ -178,7 +178,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
   // YENİ: Tüm kart yerine sadece çerçeve stili.
   const getCardBaseStyle = () => {
     if (isGhost && !isExiled) return "grayscale opacity-60 border-slate-800/30 bg-slate-950/30";
-    if (isExiled || project.project_risk_band === "RUGGED") return "border-red-500/40 bg-gradient-to-br from-red-950/30 to-slate-950/90 shadow-[0_0_20px_-5px_rgba(239,68,68,0.2)] grayscale-[0.5]";
+    if (isExiled || project.project_risk_band === "RUGGED") return "border-red-500/40 bg-linear-to-br from-red-950/30 to-slate-950/90 shadow-[0_0_20px_-5px_rgba(239,68,68,0.2)] grayscale-[0.5]";
     
     // pm-card provides base glass + transition + active:scale; pm-glow-emerald provides default hover.
     // Only return state-specific overrides here.
@@ -187,16 +187,16 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
     if (project.project_risk_band === "SAFE") {
       style = isExpanded
         ? "border-emerald-500/50 bg-slate-900/60 shadow-[0_0_25px_-5px_rgba(16,185,129,0.22)]"
-        : "border-emerald-500/25 bg-gradient-to-br from-emerald-950/20 to-slate-950/85 shadow-[0_0_18px_-3px_rgba(16,185,129,0.14)]";
+        : "border-emerald-500/25 bg-linear-to-br from-emerald-950/20 to-slate-950/85 shadow-[0_0_18px_-3px_rgba(16,185,129,0.14)]";
     } else if (project.project_risk_band === "LOW_RISK") {
       style = isExpanded
         ? "border-blue-500/40 bg-slate-900/60 shadow-[0_0_20px_-5px_rgba(59,130,246,0.18)]"
-        : "border-blue-500/20 bg-gradient-to-br from-blue-950/10 to-slate-950/80";
+        : "border-blue-500/20 bg-linear-to-br from-blue-950/10 to-slate-950/80";
     }
 
-    if (rank === 1) style += ` relative z-10 scale-[1.02] bg-gradient-to-br from-yellow-500/10 to-transparent shadow-[0_0_30px_-5px_rgba(250,204,21,0.2)] ${isExpanded ? 'border-yellow-400/80' : 'border-yellow-400/50'} ${project.project_risk_band === 'SAFE' ? 'ring-1 ring-emerald-500/50' : ''}`;
-    if (rank === 2) style += ` bg-gradient-to-br from-slate-400/5 to-transparent shadow-[0_0_20px_-5px_rgba(148,163,184,0.15)] ${isExpanded ? 'border-slate-300/60' : 'border-slate-300/40'}`;
-    if (rank === 3) style += ` bg-gradient-to-br from-orange-500/5 to-transparent shadow-[0_0_20px_-5px_rgba(251,146,60,0.15)] ${isExpanded ? 'border-orange-400/60' : 'border-orange-400/40'}`;
+    if (rank === 1) style += ` relative z-10 scale-[1.02] bg-linear-to-br from-yellow-500/10 to-transparent shadow-[0_0_30px_-5px_rgba(250,204,21,0.2)] ${isExpanded ? 'border-yellow-400/80' : 'border-yellow-400/50'} ${project.project_risk_band === 'SAFE' ? 'ring-1 ring-emerald-500/50' : ''}`;
+    if (rank === 2) style += ` bg-linear-to-br from-slate-400/5 to-transparent shadow-[0_0_20px_-5px_rgba(148,163,184,0.15)] ${isExpanded ? 'border-slate-300/60' : 'border-slate-300/40'}`;
+    if (rank === 3) style += ` bg-linear-to-br from-orange-500/5 to-transparent shadow-[0_0_20px_-5px_rgba(251,146,60,0.15)] ${isExpanded ? 'border-orange-400/60' : 'border-orange-400/40'}`;
     
     return style;
   };
@@ -213,8 +213,8 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
         <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0 flex-1 border-b border-slate-800/50 pb-3 sm:border-b-0 sm:pb-0">
           <RankIcon rank={rank} isExiled={isExiled} />
 
-          <div className={`h-11 w-11 rounded-xl flex items-center justify-center font-black shadow-md flex-shrink-0 ${
-              isExiled ? "bg-red-950 border border-red-500/30 text-red-500" : isGhost ? "bg-slate-800/80 border border-slate-700/60 text-slate-600" : rank === 1 ? "bg-gradient-to-br from-yellow-500/25 to-amber-600/15 border border-yellow-500/25 text-yellow-300" : rank <= 3 ? "bg-gradient-to-br from-purple-500/20 to-amber-500/10 border border-purple-500/20 text-purple-200" : "bg-gradient-to-br from-purple-500/15 to-emerald-500/10 border border-purple-500/10 text-purple-300"
+          <div className={`h-11 w-11 rounded-xl flex items-center justify-center font-black shadow-md shrink-0 ${
+              isExiled ? "bg-red-950 border border-red-500/30 text-red-500" : isGhost ? "bg-slate-800/80 border border-slate-700/60 text-slate-600" : rank === 1 ? "bg-linear-to-br from-yellow-500/25 to-amber-600/15 border border-yellow-500/25 text-yellow-300" : rank <= 3 ? "bg-linear-to-br from-purple-500/20 to-amber-500/10 border border-purple-500/20 text-purple-200" : "bg-linear-to-br from-purple-500/15 to-emerald-500/10 border border-purple-500/10 text-purple-300"
             }`}
           >
             {isGhost && !isExiled ? <Ghost className="h-5 w-5" /> : <span className={`text-[11px] leading-none tracking-tight ${isExiled ? "line-through opacity-70" : ""}`}>${(project.symbol || "???").slice(0, 4)}</span>}
@@ -248,7 +248,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
         </div>
 
         {/* Market Cap + Expand */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0 sm:pl-2">
+        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 sm:pl-2">
           <div className="bg-slate-800/50 rounded-lg px-3 py-2 sm:bg-transparent sm:p-0 sm:rounded-none sm:text-right">
             <p className={`text-[10px] uppercase tracking-wider mb-1 sm:hidden ${isExiled ? "text-red-500/40" : isGhost ? "text-slate-700" : "text-slate-500"}`}>
               {isExiled ? "RUGGED" : "Market Cap"}

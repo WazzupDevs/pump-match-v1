@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { getLatestPublicReceipt } from "@/lib/receipts";
 
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -255,6 +256,12 @@ export default async function ProfilePage({
     );
   }
 
+  // Phase 2C: If a public receipt exists, redirect to canonical receipt route.
+  const latestReceipt = await getLatestPublicReceipt(address);
+  if (latestReceipt) {
+    redirect(`/receipt/${latestReceipt.shareId}`);
+  }
+
   const origin = await originFromHeaders();
   const res = await fetch(`${origin}/api/profile/${address}`, {
     next: { revalidate: 300 },
@@ -284,13 +291,13 @@ export default async function ProfilePage({
         <div className="mb-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-emerald-400/80">
-              Public Behavioral Analysis
+              Public Behavioral Intelligence
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-100 md:text-4xl">
               {shortenAddress(address)}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
-              A public view of visible behavioral signals for this wallet.
+              A calm, explainable view of this wallet&apos;s public behavioral signals.
             </p>
           </div>
 
@@ -343,13 +350,13 @@ export default async function ProfilePage({
           >
             <div className={`absolute inset-0 opacity-30 blur-3xl ${tone.glow}`} />
             <p className="relative z-10 mb-2 text-sm text-slate-400">
-              Public Score Surface
+              Legacy Public Score
             </p>
-            <div className={`relative z-10 text-7xl font-black tracking-tighter ${tone.text}`}>
+            <div className={`relative z-10 text-5xl font-black tracking-tighter ${tone.text}`}>
               {trustScore}
             </div>
-            <p className="relative z-10 mt-3 text-sm text-slate-500">
-              Compatibility score derived from public behavioral signals.
+            <p className="relative z-10 mt-3 text-xs text-slate-500">
+              Compatibility score derived from public behavioral signals. Primary style, quality, risk, and confidence are the canonical intelligence surface.
             </p>
           </div>
         </div>

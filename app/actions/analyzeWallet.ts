@@ -10,15 +10,28 @@ import {
 } from "@/lib/helius";
 import { getMatches } from "@/lib/match-engine";
 import {
-  getUserProfile, isUserRegistered, upsertUser, findMatches, updateMatchSnapshot,
-  getEndorsementCount, addEndorsement, getEndorsementCounts, getMyEndorsements,
+  getUserProfile,
+  isUserRegistered,
+  upsertUser,
+  findMatches,
+  updateMatchSnapshot,
+  getEndorsementCount,
+  addEndorsement,
+  getEndorsementCounts,
+  getMyEndorsements,
   leaveNetwork,
+  insertScoreSnapshot,
+  updateArenaBridge,
 } from "@/lib/db";
 import { checkRateLimit, RATE_LIMITS, getRedisClient } from "@/lib/rate-limiter";
 // SECURITY: Crypto helpers extracted to lib/signature.ts to avoid duplication
 import { verifyLegacySignature as verifyWalletSignature } from "@/lib/signature";
 import { headers } from "next/headers";
 import { isArchitect } from "@/lib/architect";
+import {
+  createReceipt,
+  getUserLatestSnapshotId,
+} from "@/lib/receipts";
 
 import type {
   AnalyzeWalletResult,
@@ -37,6 +50,7 @@ import type {
   WalletAnalysis,
 } from "@/types";
 import { getTokenMarketSnapshot } from "@/lib/market-data";
+import { computeIntelligenceReport } from "@/lib/intelligence-engine";
 
 /**
  * Backward-compat normalizer: ensures confidence exists on PumpStats.
@@ -162,6 +176,8 @@ function computeTokenDiversity(items: DasAsset[]): number {
 
 // ---------------- 1. BÖLÜM: BADGE & SCORE ENGINE ----------------
 
+// Legacy badge system — presentation-layer heuristic built on top of wallet scores.
+// Not part of canonical Intelligence Core v2; slated for extraction to lib/badges.ts.
 const BADGE_DEFINITIONS: Record<BadgeId, { label: string; category: BadgeCategory; baseWeight: number; icon: string }> = {
   whale: { label: "Whale", category: "SYSTEM", baseWeight: 6, icon: "Waves" },
   dev: { label: "Dev", category: "SYSTEM", baseWeight: 5, icon: "Code" },
@@ -172,6 +188,8 @@ const BADGE_DEFINITIONS: Record<BadgeId, { label: string; category: BadgeCategor
   rug_magnet: { label: "Rug Magnet", category: "SYSTEM", baseWeight: 0, icon: "AlertTriangle" },
 };
 
+// Legacy badge assignment — presentation logic using simple thresholds.
+// Future versions should derive badges from Intelligence Core outputs instead.
 function assignBadges(
   solBalance: number,
   transactionCount: number,
@@ -253,6 +271,8 @@ function calculateScore(
  * System Score: System badge'lerin ağırlık toplamı
  * Social Score: Social badge'leri ağırlığa göre sırala -> Decay [1, 0.6, 0.3] uygula -> Topla
  */
+// Legacy badge score aggregation — used for current presentation and trust heuristics.
+// Canonical scoring now lives in the intelligence engine; this will be migrated later.
 function calculateBadgeScores(badgeIds: BadgeId[]): { systemScore: number; socialScore: number } {
   const systemBadges: Badge[] = [];
   const socialBadges: Badge[] = [];
@@ -297,7 +317,7 @@ function calculateBadgeScores(badgeIds: BadgeId[]): { systemScore: number; socia
 // ──────────────────────────────────────────────────────────────
 
 /** Stage 1 output: raw on-chain data collected from Helius APIs */
-type OnchainCore = {
+export type OnchainCore = {
   solBalance: number;
   transactionCount: number;
   fungibleTokens: number;
@@ -399,215 +419,6 @@ async function fetchOnchainCore(trimmed: string): Promise<OnchainCore> {
 }
 
 /**
- * V8 Stage 2: Derive behavioral metrics from on-chain core data.
- * Uses only data already fetched — zero additional API calls.
- */
-function deriveBehavioralMetrics(core: OnchainCore): BehavioralMetrics | undefined {
-  const { pumpStats, transactionCount, approxWalletAgeDays } = core;
-
-  // Without pumpStats we cannot derive meaningful behavioral metrics
-  if (!pumpStats || pumpStats.pumpMintsTouched < 1) {
-    return undefined;
-  }
-
-  const jeetIndex = pumpStats.jeetScore;
-  const rugExposureIndex = pumpStats.rugMagnetScore;
-  const avgHoldingTimeSec = pumpStats.medianHoldTimeSeconds > 0
-    ? pumpStats.medianHoldTimeSeconds
-    : undefined;
-
-  // Trade frequency: closedPositions relative to wallet age (days active)
-  let tradeFreqScore: number | undefined;
-  if (approxWalletAgeDays != null && approxWalletAgeDays > 0) {
-    const tradesPerDay = pumpStats.closedPositions / approxWalletAgeDays;
-    // Scale: 0 trades/day = 0, 5+ trades/day = 100
-    tradeFreqScore = Math.min(100, Math.round(tradesPerDay * 20));
-  } else if (transactionCount > 0) {
-    // Fallback: use raw closed positions as a rough proxy
-    tradeFreqScore = Math.min(100, pumpStats.closedPositions * 5);
-  }
-
-  // Build confidence label based on available data sources
-  const sources: string[] = ["Helius Enhanced TX"];
-  if (pumpStats.closedPositions >= 3) sources.push("Pump Simulation");
-  if (approxWalletAgeDays != null) sources.push("Wallet Age");
-  const confidenceLabel = sources.join(" + ");
-
-  return {
-    jeetIndex,
-    rugExposureIndex,
-    avgHoldingTimeSec,
-    tradeFreqScore,
-    confidenceLabel,
-  };
-}
-
-function clamp0to100(value: number): number {
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function confidenceLabelFromSample(sampleSize: number): ConfidenceLevel {
-  if (sampleSize >= 25) return "HIGH";
-  if (sampleSize >= 8) return "MEDIUM";
-  return "LOW";
-}
-
-function deriveStyleScores(core: OnchainCore, behavioral?: BehavioralMetrics) {
-  const pump = core.pumpStats;
-
-  const sniper = clamp0to100(
-    ((pump?.closedPositions ?? 0) >= 5 ? 35 : 0) +
-      ((behavioral?.tradeFreqScore ?? 0) * 0.45) +
-      ((behavioral?.jeetIndex ?? 0) * 0.30)
-  );
-
-  const scalper = clamp0to100(
-    ((behavioral?.jeetIndex ?? 0) * 0.55) +
-      ((behavioral?.tradeFreqScore ?? 0) * 0.35)
-  );
-
-  const conviction = clamp0to100(
-    (behavioral?.avgHoldingTimeSec
-      ? Math.min(100, behavioral.avgHoldingTimeSec / 1800)
-      : 0) *
-      0.55 +
-      Math.max(0, 100 - (behavioral?.jeetIndex ?? 0)) * 0.30 +
-      Math.max(0, 100 - (behavioral?.rugExposureIndex ?? 0)) * 0.15
-  );
-
-  const swing = clamp0to100(
-    conviction * 0.55 +
-      Math.max(0, 100 - (behavioral?.tradeFreqScore ?? 0)) * 0.20 +
-      Math.min(core.tokenDiversity * 4, 100) * 0.25
-  );
-
-  return {
-    sniper,
-    scalper,
-    swing,
-    conviction,
-  };
-}
-
-function deriveQualityScores(core: OnchainCore, behavioral?: BehavioralMetrics) {
-  const tx = Math.max(0, core.transactionCount);
-  const sampleQuality = Math.min(100, tx / 8);
-
-  const consistency = clamp0to100(
-    sampleQuality * 0.45 +
-      Math.max(0, 100 - (behavioral?.rugExposureIndex ?? 0)) * 0.30 +
-      Math.max(0, 100 - (behavioral?.jeetIndex ?? 0)) * 0.25
-  );
-
-  const pnlQuality = clamp0to100(
-    Math.max(0, 100 - (behavioral?.rugExposureIndex ?? 0)) * 0.55 +
-      Math.min(core.tokenDiversity * 5, 100) * 0.20 +
-      Math.min((core.portfolioValueUsd ?? 0) / 50, 100) * 0.25
-  );
-
-  const longevity = clamp0to100(
-    Math.min((core.approxWalletAgeDays ?? 0) / 3, 100) * 0.70 +
-      sampleQuality * 0.30
-  );
-
-  const overall = clamp0to100(
-    consistency * 0.4 + pnlQuality * 0.3 + longevity * 0.3
-  );
-
-  return {
-    consistency,
-    pnlQuality,
-    longevity,
-    overall,
-  };
-}
-
-function deriveRiskScores(core: OnchainCore, behavioral?: BehavioralMetrics) {
-  const churn = clamp0to100(behavioral?.jeetIndex ?? 0);
-  const rugExposure = clamp0to100(behavioral?.rugExposureIndex ?? 0);
-  const suspiciousness = clamp0to100(churn * 0.5 + rugExposure * 0.5);
-
-  return {
-    churn,
-    rugExposure,
-    suspiciousness,
-  };
-}
-
-function pickPrimaryStyle(styleScores: {
-  sniper: number;
-  scalper: number;
-  swing: number;
-  conviction: number;
-}) {
-  const entries: [string, number][] = [
-    ["High-Frequency Sniper", styleScores.sniper],
-    ["Fast Churn Trader", styleScores.scalper],
-    ["Swing Trader", styleScores.swing],
-    ["Conviction Holder", styleScores.conviction],
-  ];
-
-  return entries.sort((a, b) => b[1] - a[1])[0][0];
-}
-
-function buildIntelligenceSummary(
-  primaryStyle: string,
-  qualityOverall: number,
-  suspiciousness: number,
-  confidence: ConfidenceLevel
-) {
-  let qualityText = "mixed quality";
-  if (qualityOverall >= 75) qualityText = "strong quality";
-  else if (qualityOverall >= 50) qualityText = "moderate quality";
-
-  let riskText = "elevated suspiciousness";
-  if (suspiciousness < 35) riskText = "low suspiciousness";
-  else if (suspiciousness < 60) riskText = "moderate suspiciousness";
-
-  return {
-    primaryStyle,
-    summary: `${primaryStyle} with ${qualityText}, ${riskText}, and ${confidence.toLowerCase()} confidence.`,
-  };
-}
-
-function buildCompatibilityTrustScore(
-  legacyScore: number,
-  qualityOverall: number,
-  suspiciousness: number,
-  confidenceOverall: number
-) {
-  return clamp0to100(
-    legacyScore * 0.45 +
-      qualityOverall * 0.30 +
-      Math.max(0, 100 - suspiciousness) * 0.15 +
-      confidenceOverall * 0.10
-  );
-}
-
-function buildIntelligenceFirstLabel(
-  primaryStyle: string,
-  qualityOverall: number,
-  suspiciousness: number,
-  confidence: ConfidenceLevel
-) {
-  const qualityText =
-    qualityOverall >= 75
-      ? "Strong Quality"
-      : qualityOverall >= 50
-      ? "Moderate Quality"
-      : "Early Quality";
-
-  const riskText =
-    suspiciousness < 35
-      ? "Low Risk"
-      : suspiciousness < 60
-      ? "Moderate Risk"
-      : "Elevated Risk";
-
-  return `${primaryStyle} · ${qualityText} · ${riskText} · ${confidence}`;
-}
-
-/**
  * V8 Stage 3: Enrich with DexScreener market data.
  * Fail-safe: never throws, never slows core pipeline.
  * Uses Promise.allSettled + per-mint timeout (4s) + mint cap (5).
@@ -644,7 +455,14 @@ async function enrichWithMarketData(
 // Main Entry Point
 // ──────────────────────────────────────────────────────────────
 
-export async function analyzeWallet(address: string, userIntent?: UserIntent): Promise<AnalyzeWalletResponse> {
+type AnalyzeWalletOptions = {
+  includePreviewMatches?: boolean;
+};
+
+export async function analyzeWallet(
+  address: string,
+  options?: AnalyzeWalletOptions,
+): Promise<AnalyzeWalletResponse> {
   // Universal normalization + validation (strips web3:solana: prefix, validates base58)
   const trimmed = normalizeAndValidateSolanaAddress(address);
 
@@ -661,24 +479,30 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
   const cached = await getCachedAnalysis(cacheKey);
   if (cached && Date.now() - cached.timestamp < ANALYSIS_CACHE_TTL_MS) {
     // eslint-disable-next-line no-console
-    console.log(`[analyzeWallet] Cache HIT for ${trimmed.slice(0, 8)}... (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+    console.log(
+      `[analyzeWallet] Cache HIT for ${trimmed.slice(0, 8)}... (age: ${Math.round(
+        (Date.now() - cached.timestamp) / 1000,
+      )}s)`,
+    );
 
     // Backward-compat: normalize pumpStats.confidence for pre-V8 cached responses
     const cachedWa = cached.response.walletAnalysis;
     const normalizedPs = normalizePumpStats(cachedWa.pumpStats);
-    const needsNormalize = normalizedPs !== cachedWa.pumpStats;
+    const walletAnalysis =
+      normalizedPs !== cachedWa.pumpStats
+        ? { ...cachedWa, pumpStats: normalizedPs }
+        : cachedWa;
 
-    // If intent changed, update it in the cached response without re-fetching
-    if ((userIntent && cachedWa.intent !== userIntent) || needsNormalize) {
-      const updatedAnalysis = {
-        ...cachedWa,
-        ...(userIntent ? { intent: userIntent } : {}),
-        ...(needsNormalize ? { pumpStats: normalizedPs } : {}),
-      };
-      const updatedMatches = getMatches(updatedAnalysis);
-      return { ...cached.response, walletAnalysis: updatedAnalysis, matches: updatedMatches };
+    let matches: MatchProfile[] | undefined;
+    if (options?.includePreviewMatches) {
+      matches = getMatches(walletAnalysis);
     }
-    return cached.response;
+
+    return {
+      analysis: cached.response.analysis,
+      walletAnalysis,
+      ...(matches ? { matches } : {}),
+    };
   }
 
   // SECURITY (VULN-11): Rate limit by wallet address — prevents Helius API exhaustion
@@ -689,40 +513,48 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
   }
 
   try {
-    // ── V8 Stage 1: Fetch on-chain core ──
+    // ── Stage 1: Fetch on-chain core ──
     const core = await fetchOnchainCore(trimmed);
 
-    // ── V8 Stage 2: Derive behavioral metrics ──
-    const behavioral = deriveBehavioralMetrics(core);
+    // ── Stage 2: Compute canonical intelligence report (pure engine) ──
+    const intelligenceReport = computeIntelligenceReport(core, "v2.0", "all");
 
-    const styleScores = deriveStyleScores(core, behavioral);
-    const qualityScores = deriveQualityScores(core, behavioral);
-    const riskScores = deriveRiskScores(core, behavioral);
+    const {
+      snapshot,
+      behavioral: behavioralFeatures,
+      legacyTrustScore,
+    } = intelligenceReport;
 
-    const sampleSize =
-      core.pumpStats?.closedPositions ??
-      Math.max(0, Math.min(core.transactionCount, 100));
-
-    const confidenceLabel = confidenceLabelFromSample(sampleSize);
-    const confidenceOverall =
-      confidenceLabel === "HIGH"
-        ? 85
-        : confidenceLabel === "MEDIUM"
-        ? 60
-        : 35;
-
-    const primaryStyle = pickPrimaryStyle(styleScores);
-
-    const intelligenceSummary = buildIntelligenceSummary(
-      primaryStyle,
-      qualityScores.overall,
-      riskScores.suspiciousness,
-      confidenceLabel
-    );
-
-    const { solBalance, transactionCount, fungibleTokens, totalNfts, totalAssets,
-            tokenDiversity, activityCount, pumpStats, portfolioValueUsd } = core;
+    const {
+      solBalance,
+      transactionCount,
+      fungibleTokens,
+      totalNfts,
+      totalAssets,
+      tokenDiversity,
+      activityCount,
+      pumpStats,
+      portfolioValueUsd,
+    } = core;
     let { scoreBreakdown, badges } = core;
+
+    const behavioral: BehavioralMetrics | undefined = behavioralFeatures
+      ? {
+          jeetIndex: behavioralFeatures.jeetIndex,
+          rugExposureIndex: behavioralFeatures.rugExposureIndex,
+          avgHoldingTimeSec: behavioralFeatures.avgHoldingTimeSec,
+          tradeFreqScore: behavioralFeatures.tradeFreqScore,
+          evidenceSources: behavioralFeatures.evidenceSources,
+          confidenceLabel: behavioralFeatures.evidenceSources,
+        }
+      : undefined;
+
+    const styleScores = snapshot.style;
+    const qualityScores = snapshot.quality;
+    const riskScores = snapshot.risk;
+    const intelligenceConfidence = snapshot.confidence;
+    const intelligenceSummaryCore = snapshot.summary;
+    const sampleSize = snapshot.sampleSize;
 
     const analysisResult: AnalyzeWalletResult = {
       address: trimmed,
@@ -735,24 +567,6 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       tokenDiversity,
       scoreBreakdown,
     };
-
-    const legacyScore = scoreBreakdown.total;
-
-    const trustScore = buildCompatibilityTrustScore(
-      legacyScore,
-      qualityScores.overall,
-      riskScores.suspiciousness,
-      confidenceOverall
-    );
-
-    const score = trustScore;
-
-    const scoreLabel = buildIntelligenceFirstLabel(
-      primaryStyle,
-      qualityScores.overall,
-      riskScores.suspiciousness,
-      confidenceLabel
-    );
 
     // Opt-In Network Architecture - Check if user is registered
     const isRegistered = await isUserRegistered(trimmed);
@@ -772,35 +586,74 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
 
     // SECURITY (VULN-03): Only update trust score for ALREADY-REGISTERED users.
     const architectActive = isArchitect(trimmed);
+
+    // ── Persist canonical score snapshot (non-fatal on failure) ──
+    let snapshotId: string | null = null;
+    try {
+      snapshotId = await insertScoreSnapshot(trimmed, snapshot);
+    } catch (dbError) {
+      // eslint-disable-next-line no-console
+      console.error("[analyzeWallet] Failed to insert score snapshot:", dbError);
+    }
+
+    // ── Compatibility: update users + Arena bridge for registered, non-architect users ──
     if (isRegistered && !architectActive) {
       try {
-        const calculatedLevel = badges.includes("whale") ? "Whale" :
-                                badges.includes("dev") ? "Dev" :
-                                badges.includes("og_wallet") ? "OG" : "Rookie";
+        const calculatedLevel = badges.includes("whale")
+          ? "Whale"
+          : badges.includes("dev")
+          ? "Dev"
+          : badges.includes("og_wallet")
+          ? "OG"
+          : "Rookie";
 
         await upsertUser(trimmed, {
-          trust_score: trustScore,
+          trust_score: legacyTrustScore,
           level: calculatedLevel,
+          latest_snapshot_id: snapshotId ?? undefined,
         });
+
+        if (snapshotId) {
+          const profile = await getUserProfile(trimmed);
+          if (profile) {
+            await updateArenaBridge(profile.id, {
+              latestSnapshotId: snapshotId,
+              primaryStyle: intelligenceSummaryCore.primaryStyle,
+              qualityOverall: qualityScores.overall,
+              suspiciousness: riskScores.suspiciousness,
+              confidenceTier: intelligenceConfidence.tier,
+              scoreLabel: intelligenceSummaryCore.scoreLabel,
+            });
+          }
+        }
       } catch (dbError) {
+        // eslint-disable-next-line no-console
         console.error("[analyzeWallet] Supabase Sync Failed:", dbError);
       }
     }
 
     // ── Architect Mode: in-memory overrides (never persisted to DB) ──
-    let finalTrustScore = trustScore;
-    let finalScore = score;
-    let finalScoreLabel = scoreLabel;
+    let finalTrustScore = legacyTrustScore;
+    let finalScore = legacyTrustScore;
+    let finalScoreLabel = intelligenceSummaryCore.scoreLabel;
     let finalScoreBreakdown = scoreBreakdown;
     let finalBadges: BadgeId[] = badges;
     let finalSystemScore = systemScore;
     let finalSocialScore = socialScore;
+    let finalStyleScores = styleScores;
+    let finalQualityScores = qualityScores;
+    let finalRiskScores = riskScores;
+    let finalIntelligenceConfidence = intelligenceConfidence;
+    let finalIntelligenceSummary = intelligenceSummaryCore;
+    let finalIntelligenceReport = intelligenceReport;
 
     if (architectActive) {
-      console.log(`[analyzeWallet] ARCHITECT MODE active for ${trimmed.slice(0, 8)}...`);
+      console.log(
+        `[analyzeWallet] ARCHITECT MODE active for ${trimmed.slice(0, 8)}...`,
+      );
       finalTrustScore = 99;
       finalScore = 99;
-      finalScoreLabel = "CHAD";
+      finalScoreLabel = "Architect Mode · Maxed";
       finalScoreBreakdown = {
         balanceScore: 40,
         activityScore: 40,
@@ -809,10 +662,62 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
         total: 99,
         explanation: "Architect Mode · All scores maxed",
       };
-      finalBadges = ["whale", "dev", "og_wallet", "diamond_hands", "community_trusted"];
+      finalBadges = [
+        "whale",
+        "dev",
+        "og_wallet",
+        "diamond_hands",
+        "community_trusted",
+      ];
       const archBadgeScores = calculateBadgeScores(finalBadges);
       finalSystemScore = archBadgeScores.systemScore;
       finalSocialScore = archBadgeScores.socialScore;
+
+      finalStyleScores = {
+        sniper: 88,
+        scalper: 42,
+        swing: 80,
+        conviction: 91,
+      };
+
+      finalQualityScores = {
+        consistency: 95,
+        pnlQuality: 94,
+        longevity: 93,
+        overall: 94,
+      };
+
+      finalRiskScores = {
+        churn: 8,
+        rugExposure: 4,
+        suspiciousness: 6,
+      };
+
+      finalIntelligenceConfidence = {
+        overall: 95,
+        tier: "HIGH",
+        sampleSize: 99,
+      };
+
+      finalIntelligenceSummary = {
+        primaryStyle: "Conviction Holder",
+        scoreLabel: "Conviction Holder · Strong Quality · Low Risk · HIGH",
+        summary:
+          "Conviction Holder with strong quality, low suspiciousness, and high confidence.",
+      };
+
+      finalIntelligenceReport = {
+        snapshot: {
+          ...intelligenceReport.snapshot,
+          style: finalStyleScores,
+          quality: finalQualityScores,
+          risk: finalRiskScores,
+          confidence: finalIntelligenceConfidence,
+          summary: finalIntelligenceSummary,
+        },
+        behavioral: intelligenceReport.behavioral,
+        legacyTrustScore: finalTrustScore,
+      };
     }
 
     let walletAnalysis: WalletAnalysis = {
@@ -830,70 +735,47 @@ export async function analyzeWallet(address: string, userIntent?: UserIntent): P
       scoreBreakdown: finalScoreBreakdown,
       systemScore: finalSystemScore,
       socialScore: finalSocialScore,
-      intent: userIntent,
       isRegistered,
       approxWalletAge: core.approxWalletAgeDays ?? undefined,
       pumpStats: normalizePumpStats(pumpStats),
       portfolioValueUsd,
       behavioral,
-      styleScores,
-      qualityScores,
-      riskScores,
+      styleScores: finalStyleScores,
+      qualityScores: finalQualityScores,
+      riskScores: finalRiskScores,
       intelligenceConfidence: {
-        overall: confidenceOverall,
-        label: confidenceLabel,
-        sampleSize,
+        overall: finalIntelligenceConfidence.overall,
+        label: finalIntelligenceConfidence.tier,
+        sampleSize: finalIntelligenceConfidence.sampleSize,
       },
-      intelligenceSummary,
+      intelligenceSummary: {
+        primaryStyle: finalIntelligenceSummary.primaryStyle,
+        summary: finalIntelligenceSummary.summary,
+      },
+      intelligenceReport: finalIntelligenceReport,
     };
-
-    if (architectActive) {
-      walletAnalysis = {
-        ...walletAnalysis,
-        styleScores: {
-          sniper: 88,
-          scalper: 42,
-          swing: 80,
-          conviction: 91,
-        },
-        qualityScores: {
-          consistency: 95,
-          pnlQuality: 94,
-          longevity: 93,
-          overall: 94,
-        },
-        riskScores: {
-          churn: 8,
-          rugExposure: 4,
-          suspiciousness: 6,
-        },
-        intelligenceConfidence: {
-          overall: 95,
-          label: "HIGH",
-          sampleSize: 99,
-        },
-        intelligenceSummary: {
-          primaryStyle: "Conviction Holder",
-          summary:
-            "Conviction Holder with strong quality, low suspiciousness, and high confidence.",
-        },
-      };
-    }
 
     // ── V8 Stage 3: Enrich with market data (stub — no-op for now) ──
     walletAnalysis = await enrichWithMarketData(walletAnalysis, core);
 
     // Match Engine: Calculate matches (read-only, mock data for preview)
-    const matches = getMatches(walletAnalysis);
+    let matches: MatchProfile[] | undefined;
+    if (options?.includePreviewMatches) {
+      matches = getMatches(walletAnalysis);
+    }
 
     const response: AnalyzeWalletResponse = {
       analysis: analysisResult,
       walletAnalysis,
-      matches,
+      ...(matches ? { matches } : {}),
     };
 
     // Production Grade: Store in Redis (or in-memory fallback for dev)
-    await setCachedAnalysis(cacheKey, { response, timestamp: Date.now() });
+    // Cache only the core analysis; preview matches are recomputed on demand.
+    await setCachedAnalysis(cacheKey, {
+      response: { analysis: analysisResult, walletAnalysis },
+      timestamp: Date.now(),
+    });
     // eslint-disable-next-line no-console
     console.log(`[analyzeWallet] Cache MISS for ${trimmed}. Stored.`);
 
@@ -1117,6 +999,111 @@ export async function joinNetwork(
     return {
       success: false,
       message: `Failed to join network: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * Publish a public intelligence receipt for a wallet.
+ * Requires explicit wallet signature consent and an existing latest snapshot.
+ */
+export async function publishReceiptAction(
+  address: string,
+  signedMessage: { message: string; signature: string },
+): Promise<{ success: boolean; message: string; shareId?: string }> {
+  "use server";
+
+  try {
+    const trimmed = normalizeAndValidateSolanaAddress(address);
+
+    // Canonical message parsing — aligned with existing Join/Update/Leave format
+    const m = signedMessage.message.match(
+      /^Pump Match (Join|Update|Leave|Publish)\r?\nWallet:\s([1-9A-HJ-NP-Za-km-z]{32,44})\r?\nTimestamp:\s(\d{13})$/,
+    );
+    if (!m) {
+      return { success: false, message: "Malformed signature message format." };
+    }
+
+    const [, actionType, msgWallet, tsStr] = m;
+    if (actionType !== "Publish") {
+      return {
+        success: false,
+        message: "Signature action mismatch. Expected 'Publish'.",
+      };
+    }
+    if (msgWallet !== trimmed) {
+      return {
+        success: false,
+        message: "Message wallet does not match target wallet.",
+      };
+    }
+
+    const parsedTs = Number(tsStr);
+    const now = Date.now();
+    const TIME_WINDOW_MS = 5 * 60 * 1000;
+    const FUTURE_SKEW_MS = 30 * 1000;
+    if (
+      !Number.isFinite(parsedTs) ||
+      parsedTs > now + FUTURE_SKEW_MS ||
+      now - parsedTs > TIME_WINDOW_MS
+    ) {
+      return {
+        success: false,
+        message: "Signature expired. Please sign again.",
+      };
+    }
+
+    const isValidSig = await verifyWalletSignature(
+      trimmed,
+      signedMessage.message,
+      signedMessage.signature,
+    );
+    if (!isValidSig) {
+      return {
+        success: false,
+        message: "Signature verification failed. Please reconnect your wallet.",
+      };
+    }
+
+    // Fetch latest snapshot pointer from users table
+    const snapshotInfo = await getUserLatestSnapshotId(trimmed);
+    if (!snapshotInfo || !snapshotInfo.latestSnapshotId) {
+      return {
+        success: false,
+        message: "No intelligence snapshot found. Analyze your wallet first.",
+      };
+    }
+
+    const receipt = await createReceipt(
+      trimmed,
+      snapshotInfo.latestSnapshotId,
+      "PUBLIC",
+    );
+
+    if (!receipt) {
+      return {
+        success: false,
+        message: "Failed to create receipt. Please try again.",
+      };
+    }
+
+    // Upgrade visibility to PUBLIC in users table (type-safe)
+    await upsertUser(trimmed, {
+      visibility_mode: "PUBLIC",
+    });
+
+    return {
+      success: true,
+      shareId: receipt.shareId,
+      message: "Public intelligence receipt published successfully.",
+    };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("[publishReceiptAction] Exception:", error);
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "Failed to publish receipt.",
     };
   }
 }

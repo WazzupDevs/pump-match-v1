@@ -79,7 +79,7 @@ export function TrustBadge({
   return (
     <span
       className={`inline-flex cursor-default select-none items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors ${config.color} ${className}`}
-      title={`Public score surface: ${score}`}
+      title={`Public signal surface: ${score}`}
     >
       {config.icon}
       {label}

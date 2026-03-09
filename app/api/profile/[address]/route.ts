@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeWallet } from "@/app/actions/analyzeWallet";
+import { getUserVisibility } from "@/lib/receipts";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,11 @@ export async function GET(
   }
 
   try {
+    const visibility = await getUserVisibility(address);
+    if (visibility === "GHOST" || visibility === "CLAIMED_PRIVATE") {
+      return NextResponse.json({ error: "not_public" }, { status: 403 });
+    }
+
     const result = await analyzeWallet(address);
     const walletAnalysis = result?.walletAnalysis;
 

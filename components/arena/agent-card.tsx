@@ -430,7 +430,7 @@ export function AgentCard({
       <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-4 sm:pl-2">
         <div className="rounded-xl bg-slate-800/50 px-3 py-2.5 sm:min-w-[92px] sm:bg-transparent sm:p-0 sm:text-right">
           <p className="mb-1 text-[10px] uppercase tracking-wider text-slate-500 sm:hidden">
-            Behavioral Surface
+            Public Signal Surface
           </p>
 
           <span
@@ -446,7 +446,7 @@ export function AgentCard({
           </span>
 
           <p className="mt-0.5 hidden text-[8px] uppercase tracking-[0.16em] text-slate-600 sm:block">
-            Behavioral Surface
+            Public Signal Surface
           </p>
         </div>
 
