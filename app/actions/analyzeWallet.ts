@@ -540,12 +540,12 @@ function pickPrimaryStyle(styleScores: {
   swing: number;
   conviction: number;
 }) {
-  const entries = [
+  const entries: [string, number][] = [
     ["High-Frequency Sniper", styleScores.sniper],
     ["Fast Churn Trader", styleScores.scalper],
     ["Swing Trader", styleScores.swing],
     ["Conviction Holder", styleScores.conviction],
-  ] as const;
+  ];
 
   return entries.sort((a, b) => b[1] - a[1])[0][0];
 }
