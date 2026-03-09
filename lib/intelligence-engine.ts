@@ -10,7 +10,7 @@ import type {
   IntelligenceReport,
   BehavioralFeatures,
   ScoreSnapshot,
-} from "@/types";
+} from "@/types/intelligence";
 
 export function clamp0to100(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
