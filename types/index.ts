@@ -1,4 +1,4 @@
-export type {
+import type {
   ModelVersion,
   ScoreWindow,
   VisibilityMode,
@@ -14,6 +14,23 @@ export type {
   WalletReceipt,
   ArenaBridgeFields,
 } from "./intelligence";
+
+export type {
+  ModelVersion,
+  ScoreWindow,
+  VisibilityMode,
+  ConfidenceTier,
+  BehavioralFeatures,
+  StyleScores,
+  QualityScores,
+  RiskScores,
+  IntelligenceConfidence,
+  IntelligenceSummary,
+  ScoreSnapshot,
+  IntelligenceReport,
+  WalletReceipt,
+  ArenaBridgeFields,
+};
 
 export type BadgeId =
   | "whale"
