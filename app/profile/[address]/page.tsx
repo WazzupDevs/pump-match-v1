@@ -53,11 +53,12 @@ type PublicWalletAnalysis = {
   } | null;
   intelligenceConfidence: {
     overall: number;
-    label: "LOW" | "MEDIUM" | "HIGH";
+    tier: "LOW" | "MEDIUM" | "HIGH";
     sampleSize: number;
   } | null;
   intelligenceSummary: {
     primaryStyle: string;
+    scoreLabel: string;
     summary: string;
   } | null;
 };
@@ -323,6 +324,11 @@ export default async function ProfilePage({
             <h2 className="text-3xl font-semibold tracking-tight text-slate-100">
               {analysis.intelligenceSummary?.primaryStyle ?? "Unknown"}
             </h2>
+            {analysis.intelligenceSummary?.scoreLabel ? (
+              <p className="mt-2 text-sm font-medium text-slate-300">
+                {analysis.intelligenceSummary.scoreLabel}
+              </p>
+            ) : null}
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-400">
               {analysis.intelligenceSummary?.summary ??
                 "No intelligence summary available yet."}
@@ -331,7 +337,7 @@ export default async function ProfilePage({
             {analysis.intelligenceConfidence ? (
               <div className="mt-6 flex flex-wrap gap-2">
                 <span className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-200">
-                  Confidence {analysis.intelligenceConfidence.label}
+                  Confidence {analysis.intelligenceConfidence.tier}
                 </span>
                 <span className="rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-300">
                   Sample Size {analysis.intelligenceConfidence.sampleSize}

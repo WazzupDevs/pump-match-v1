@@ -745,11 +745,12 @@ export async function analyzeWallet(
       riskScores: finalRiskScores,
       intelligenceConfidence: {
         overall: finalIntelligenceConfidence.overall,
-        label: finalIntelligenceConfidence.tier,
+        tier: finalIntelligenceConfidence.tier,
         sampleSize: finalIntelligenceConfidence.sampleSize,
       },
       intelligenceSummary: {
         primaryStyle: finalIntelligenceSummary.primaryStyle,
+        scoreLabel: finalIntelligenceSummary.scoreLabel,
         summary: finalIntelligenceSummary.summary,
       },
       intelligenceReport: finalIntelligenceReport,
