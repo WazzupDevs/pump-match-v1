@@ -194,6 +194,7 @@ This repository is currently in an active transition from legacy trust-score/mat
 
 Canonical references:
 - `intelligence-core-v2.md`
+- `MIGRATION-V2-HARDENING.md` (allowed transitional inventory and regression checklist)
 - docs sections reflecting Behavioral Intelligence
 - Grand Vision & Product Roadmap
 - updated Cursor rules aligned to Intelligence → Reputation → Coordination

@@ -75,6 +75,18 @@ export function LinkTwitterButton() {
 
 type SyncStatus = "idle" | "waiting" | "syncing" | "success" | "error";
 
+type TwitterSyncResult = { ok: boolean; reason?: string };
+
+function normalizeTwitterSyncResult(data: unknown): TwitterSyncResult {
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return { ok: false, reason: "invalid_response" };
+  }
+  const obj = data as Record<string, unknown>;
+  const ok = typeof obj.ok === "boolean" ? obj.ok : false;
+  const reason = typeof obj.reason === "string" ? obj.reason : undefined;
+  return { ok, reason };
+}
+
 /**
  * Call sync_my_twitter_identity with exponential-backoff retries.
  *
@@ -82,7 +94,7 @@ type SyncStatus = "idle" | "waiting" | "syncing" | "success" | "error";
  * session update. We retry on "twitter_not_linked" (soft failure) but bail
  * immediately on hard errors (auth errors, missing wallet profile, etc.).
  */
-async function syncWithRetry(): Promise<{ ok: boolean; reason?: string }> {
+async function syncWithRetry(): Promise<TwitterSyncResult> {
   const DELAYS = [800, 1600, 3000, 5000, 8000]; // ~18 s total max wait
 
   for (let attempt = 0; attempt < DELAYS.length; attempt++) {
@@ -93,16 +105,17 @@ async function syncWithRetry(): Promise<{ ok: boolean; reason?: string }> {
       throw new Error(error.message);
     }
 
-    if (data?.ok) return data;
+    const result = normalizeTwitterSyncResult(data);
+    if (result.ok) return result;
 
     // Soft failure: identity write hasn't propagated yet. Back off and retry.
-    if (data?.reason === "twitter_not_linked") {
+    if (result.reason === "twitter_not_linked") {
       await new Promise((r) => setTimeout(r, DELAYS[attempt]));
       continue;
     }
 
     // Any other reason (wallet_not_found, not_authenticated…) — fail fast.
-    return data ?? { ok: false, reason: "unknown" };
+    return result;
   }
 
   return { ok: false, reason: "max_retries_exceeded" };

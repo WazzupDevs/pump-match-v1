@@ -26,12 +26,13 @@ export default function CommandCenterIndexPage() {
 
   useEffect(() => {
     if (!ready) return;
-    if (!userId) {
+    const currentUserId = userId;
+    if (!currentUserId) {
       setLoading(false);
       return;
     }
 
-    async function fetchSquads() {
+    async function fetchSquads(uid: string) {
       const wallet = (walletAddress ?? "").trim();
 
       const founderQuery = wallet
@@ -41,10 +42,10 @@ export default function CommandCenterIndexPage() {
       const memberQuery = supabase
         .from("squad_members")
         .select("project_id, role, status, squad_projects(id, project_name, ops_status, created_by_wallet)")
-        .eq("user_id", userId)
+        .eq("user_id", uid)
         .in("status", ["active", "pending_invite", "pending_application"]);
 
-      const invitesQuery = supabase.from("squad_members").select("project_id, squad_projects(project_name)").eq("user_id", userId).eq("status", "pending_invite").order("joined_at", { ascending: false }).limit(10);
+      const invitesQuery = supabase.from("squad_members").select("project_id, squad_projects(project_name)").eq("user_id", uid).eq("status", "pending_invite").order("joined_at", { ascending: false }).limit(10);
 
       const [{ data: founderProjects }, { data: memberRows }, { data: inviteRows }] = await Promise.all([founderQuery, memberQuery, invitesQuery]);
 
@@ -75,7 +76,7 @@ export default function CommandCenterIndexPage() {
       setLoading(false);
     }
 
-    fetchSquads();
+    fetchSquads(currentUserId);
   }, [ready, userId, walletAddress]);
 
   if (!ready || loading) {
@@ -95,7 +96,7 @@ export default function CommandCenterIndexPage() {
           <div className="mt-6 flex gap-3">
             <Link
               href="/"
-              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-slate-950 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              className="inline-flex items-center justify-center rounded-xl bg-linear-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-slate-950 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
             >
               Go Home
             </Link>
@@ -167,7 +168,7 @@ export default function CommandCenterIndexPage() {
                 <div className="mt-5 flex gap-3">
                   <Link
                     href="/arena"
-                    className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-slate-950 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    className="inline-flex items-center justify-center rounded-xl bg-linear-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-bold text-slate-950 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/15 transition-[box-shadow,transform] duration-200 active:scale-95 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                   >
                     Browse Arena
                   </Link>

@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { getLatestPublicReceipt } from "@/lib/receipts";
-import {
-  getPublicProfileByWallet,
-  isValidPublicWalletAddress,
-  normalizePublicWalletAddress,
-} from "@/lib/public-intelligence";
+import { notFound } from "next/navigation";
+import { analyzeWallet } from "@/app/actions/analyzeWallet";
+import { normalizeWalletAddress } from "@/lib/solana/normalizeWalletAddress";
+import type { WalletAnalysis } from "@/types";
 
 /**
- * /profile/[address] — Staged fallback public route, NOT the canonical share.
- * Canonical public share is /receipt/[shareId]. When a valid public receipt
- * exists we always redirect; this page renders only when no receipt exists.
+ * /analyze/[address] — Dedicated wallet analysis result route.
+ *
+ * Server Component only. Does NOT access window.solana or any wallet provider.
+ * Does NOT depend on /profile or /receipt logic.
+ *
+ * Separation of concerns:
+ *   /analyze/[address]  = private/default analysis result (this page)
+ *   /profile/[address]  = staged public fallback (visibility-gated)
+ *   /receipt/[shareId]  = canonical public share (consent-first)
  */
 
 function shortenAddress(address: string) {
@@ -23,31 +26,30 @@ function clampScore(value?: number | null) {
   return Math.max(0, Math.min(100, Math.round(value as number)));
 }
 
-function formatUsd(value?: number | null) {
-  if (!Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: (value as number) >= 1000 ? 0 : 2,
-  }).format(value as number);
+function scoreTone(score: number) {
+  if (score >= 80)
+    return {
+      text: "text-emerald-300",
+      ring: "border-emerald-500/20",
+      glow: "bg-emerald-500/15",
+    };
+  if (score >= 50)
+    return {
+      text: "text-amber-300",
+      ring: "border-amber-500/20",
+      glow: "bg-amber-500/15",
+    };
+  return {
+    text: "text-rose-300",
+    ring: "border-rose-500/20",
+    glow: "bg-rose-500/15",
+  };
 }
 
-function formatNumber(value?: number | null) {
-  if (!Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat("en-US").format(value as number);
-}
-
-function formatDays(value?: number | null) {
-  if (!Number.isFinite(value)) return "—";
-  return `${Math.round(value as number)}d`;
-}
-
-function formatHoldTime(seconds?: number | null) {
-  if (!Number.isFinite(seconds)) return "—";
-  if ((seconds as number) < 60) return `${Math.round(seconds as number)}s`;
-  if ((seconds as number) < 3600) return `${Math.floor((seconds as number) / 60)}m`;
-  if ((seconds as number) < 86400) return `${((seconds as number) / 3600).toFixed(1)}h`;
-  return `${((seconds as number) / 86400).toFixed(1)}d`;
+function barTone(value: number) {
+  if (value >= 75) return "from-emerald-500 to-cyan-500";
+  if (value >= 50) return "from-amber-500 to-orange-500";
+  return "from-rose-500 to-red-500";
 }
 
 function metricLabel(key: string) {
@@ -132,34 +134,33 @@ function badgeMeta(badge: string) {
   }
 }
 
-function scoreTone(score: number) {
-  if (score >= 80) {
-    return {
-      text: "text-emerald-300",
-      ring: "border-emerald-500/20",
-      glow: "bg-emerald-500/15",
-    };
-  }
-
-  if (score >= 50) {
-    return {
-      text: "text-amber-300",
-      ring: "border-amber-500/20",
-      glow: "bg-amber-500/15",
-    };
-  }
-
-  return {
-    text: "text-rose-300",
-    ring: "border-rose-500/20",
-    glow: "bg-rose-500/15",
-  };
+function formatUsd(value?: number | null) {
+  if (!Number.isFinite(value)) return "\u2014";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: (value as number) >= 1000 ? 0 : 2,
+  }).format(value as number);
 }
 
-function barTone(value: number) {
-  if (value >= 75) return "from-emerald-500 to-cyan-500";
-  if (value >= 50) return "from-amber-500 to-orange-500";
-  return "from-rose-500 to-red-500";
+function formatNumber(value?: number | null) {
+  if (!Number.isFinite(value)) return "\u2014";
+  return new Intl.NumberFormat("en-US").format(value as number);
+}
+
+function formatDays(value?: number | null) {
+  if (!Number.isFinite(value)) return "\u2014";
+  return `${Math.round(value as number)}d`;
+}
+
+function formatHoldTime(seconds?: number | null) {
+  if (!Number.isFinite(seconds)) return "\u2014";
+  if ((seconds as number) < 60) return `${Math.round(seconds as number)}s`;
+  if ((seconds as number) < 3600)
+    return `${Math.floor((seconds as number) / 60)}m`;
+  if ((seconds as number) < 86400)
+    return `${((seconds as number) / 3600).toFixed(1)}h`;
+  return `${((seconds as number) / 86400).toFixed(1)}d`;
 }
 
 export async function generateMetadata({
@@ -168,59 +169,76 @@ export async function generateMetadata({
   params: Promise<{ address: string }>;
 }): Promise<Metadata> {
   const { address: rawAddress } = await params;
-  const address = normalizePublicWalletAddress(rawAddress);
+  const result = normalizeWalletAddress(rawAddress);
 
-  if (!isValidPublicWalletAddress(address)) {
+  if (!result.ok) {
     return { title: "PumpMatch | Invalid Address" };
   }
 
   return {
-    title: `PumpMatch | ${shortenAddress(address)}`,
+    title: `PumpMatch | Analyze ${shortenAddress(result.address)}`,
     description:
-      "Public intelligence preview (staged fallback) for a Solana wallet on PumpMatch. For the canonical share, use a published receipt link.",
+      "Wallet intelligence analysis on PumpMatch \u2014 behavioral style, quality, risk, and confidence signals for a Solana wallet.",
   };
 }
 
-export default async function ProfilePage({
+export default async function AnalyzePage({
   params,
 }: {
   params: Promise<{ address: string }>;
 }) {
   const { address: rawAddress } = await params;
-  const address = normalizePublicWalletAddress(rawAddress);
+  const normalized = normalizeWalletAddress(rawAddress);
 
-  if (!isValidPublicWalletAddress(address)) {
+  // Invalid address → 404 (not an error, just a bad URL)
+  if (!normalized.ok) {
+    notFound();
+  }
+
+  const address = normalized.address;
+
+  let wa: WalletAnalysis;
+  try {
+    const response = await analyzeWallet(address);
+    wa = response.walletAnalysis;
+  } catch (error) {
+    const rawMsg = error instanceof Error ? error.message : "";
+    const isRateLimit =
+      rawMsg.includes("Rate limit") || rawMsg.includes("429");
+
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
-        <p>Invalid wallet address.</p>
+      <main className="flex min-h-screen items-center justify-center bg-slate-950">
+        <div className="max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center backdrop-blur-xl">
+          {isRateLimit ? (
+            <>
+              <p className="text-sm text-amber-400">
+                Too many requests. Please try again in a few minutes.
+              </p>
+              <Link
+                href={`/analyze/${address}`}
+                className="mt-4 inline-block text-xs text-slate-400 transition-colors hover:text-slate-200"
+              >
+                Retry analysis
+              </Link>
+            </>
+          ) : (
+            <p className="text-sm text-rose-400">
+              Analysis temporarily unavailable. Please try again.
+            </p>
+          )}
+          <Link
+            href="/"
+            className="mt-4 inline-block text-xs text-slate-500 transition-colors hover:text-slate-300"
+          >
+            Back to home
+          </Link>
+        </div>
       </main>
     );
   }
 
-  // Receipt-first: if a valid public receipt exists, always redirect to canonical share route.
-  const latestReceipt = await getLatestPublicReceipt(address);
-  if (latestReceipt) {
-    redirect(`/receipt/${latestReceipt.shareId}`);
-  }
-
-  // Staged fallback: no receipt — show visibility-gated public profile when allowed.
-  const result = await getPublicProfileByWallet(address);
-
-  if (!result.ok) {
-    if (result.code === "snapshot_unavailable") {
-      return (
-        <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
-          <p>Public intelligence snapshot not available yet.</p>
-        </main>
-      );
-    }
-
-    notFound();
-  }
-
-  const analysis = result.profile;
-  const trustScore = clampScore(analysis.trustScore);
-  const tone = scoreTone(trustScore);
+  const compatibilityScore = clampScore(wa.qualityScores?.overall);
+  const tone = scoreTone(compatibilityScore);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
@@ -229,16 +247,19 @@ export default async function ProfilePage({
       </div>
 
       <div className="mx-auto max-w-6xl px-4 py-12 md:py-20">
+        {/* Header */}
         <div className="mb-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-emerald-400/80">
-              Public Intelligence Preview
+              Wallet Intelligence
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-100 md:text-4xl">
               {shortenAddress(address)}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
-              Staged fallback view of this wallet&apos;s public behavioral signals when no receipt is shared. Publish a receipt for the canonical share link.
+              Full behavioral intelligence analysis for this Solana wallet.
+              Style, quality, risk, and confidence signals derived from
+              on-chain activity.
             </p>
           </div>
 
@@ -249,6 +270,9 @@ export default async function ProfilePage({
             >
               View Arena
             </Link>
+            {/* TODO: Add "Publish Receipt" action once a client-facing
+                receipt publish flow exists. Requires snapshotId from the
+                analysis pipeline to call createReceipt(). */}
             <Link
               href="/command-center"
               className="inline-flex items-center rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition-colors hover:bg-emerald-400"
@@ -258,66 +282,70 @@ export default async function ProfilePage({
           </div>
         </div>
 
+        {/* Primary intelligence + compatibility score */}
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          {/* Primary: canonical intelligence (style, summary, confidence). */}
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
             <p className="mb-3 text-sm text-slate-400">Primary Style</p>
             <h2 className="text-3xl font-semibold tracking-tight text-slate-100">
-              {analysis.intelligenceSummary?.primaryStyle ?? "Unknown"}
+              {wa.intelligenceSummary?.primaryStyle ?? "Unknown"}
             </h2>
-            {analysis.intelligenceSummary?.scoreLabel ? (
+            {wa.intelligenceSummary?.scoreLabel ? (
               <p className="mt-2 text-sm font-medium text-slate-300">
-                {analysis.intelligenceSummary.scoreLabel}
+                {wa.intelligenceSummary.scoreLabel}
               </p>
             ) : null}
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-400">
-              {analysis.intelligenceSummary?.summary ??
+              {wa.intelligenceSummary?.summary ??
                 "No intelligence summary available yet."}
             </p>
 
-            {analysis.intelligenceConfidence ? (
+            {wa.intelligenceConfidence ? (
               <div className="mt-6 flex flex-wrap gap-2">
                 <span className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-200">
-                  Confidence {analysis.intelligenceConfidence.tier}
+                  Confidence {wa.intelligenceConfidence.tier}
                 </span>
                 <span className="rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-300">
-                  Sample Size {analysis.intelligenceConfidence.sampleSize}
+                  Sample Size {wa.intelligenceConfidence.sampleSize}
                 </span>
-                {analysis.intelligenceSummary?.primaryStyle ? (
+                {wa.intelligenceSummary?.primaryStyle ? (
                   <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
-                    {analysis.intelligenceSummary.primaryStyle}
+                    {wa.intelligenceSummary.primaryStyle}
                   </span>
                 ) : null}
               </div>
             ) : null}
           </div>
 
-          {/* Secondary: compatibility score only; canonical view is above. */}
           <div
             className={`relative overflow-hidden rounded-3xl border bg-slate-900/55 p-6 backdrop-blur-xl ${tone.ring}`}
           >
-            <div className={`absolute inset-0 opacity-30 blur-3xl ${tone.glow}`} />
+            <div
+              className={`absolute inset-0 opacity-30 blur-3xl ${tone.glow}`}
+            />
             <p className="relative z-10 mb-2 text-sm text-slate-500">
               Compatibility score (transitional)
             </p>
-            <div className={`relative z-10 text-4xl font-black tracking-tighter ${tone.text}`}>
-              {trustScore}
+            <div
+              className={`relative z-10 text-4xl font-black tracking-tighter ${tone.text}`}
+            >
+              {compatibilityScore}
             </div>
             <p className="relative z-10 mt-3 text-xs text-slate-500">
-              Legacy scalar for compatibility. Primary style, quality, risk, and confidence above are the intelligence surface.
+              Legacy scalar for compatibility. Primary style, quality, risk,
+              and confidence above are the intelligence surface.
             </p>
           </div>
         </div>
 
+        {/* Style / Quality / Risk score bars */}
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
             <p className="mb-2 text-sm text-slate-400">Style Scores</p>
             <p className="mb-4 text-xs leading-6 text-slate-500">
-              These scores estimate how this wallet behaves in markets.
+              Estimated market behavior style based on on-chain activity.
             </p>
-
             <div className="space-y-4">
-              {Object.entries(analysis.styleScores ?? {}).map(([key, value]) => (
+              {Object.entries(wa.styleScores ?? {}).map(([key, value]) => (
                 <div key={key}>
                   <div className="mb-1.5 flex items-center justify-between text-xs">
                     <span className="uppercase tracking-wider text-slate-500">
@@ -341,11 +369,10 @@ export default async function ProfilePage({
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
             <p className="mb-2 text-sm text-slate-400">Quality Scores</p>
             <p className="mb-4 text-xs leading-6 text-slate-500">
-              These scores estimate signal quality, durability, and consistency.
+              Signal quality, durability, and consistency over time.
             </p>
-
             <div className="space-y-4">
-              {Object.entries(analysis.qualityScores ?? {}).map(([key, value]) => (
+              {Object.entries(wa.qualityScores ?? {}).map(([key, value]) => (
                 <div key={key}>
                   <div className="mb-1.5 flex items-center justify-between text-xs">
                     <span className="uppercase tracking-wider text-slate-500">
@@ -369,11 +396,10 @@ export default async function ProfilePage({
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
             <p className="mb-2 text-sm text-slate-400">Risk Scores</p>
             <p className="mb-4 text-xs leading-6 text-slate-500">
-              These scores highlight churn, rug exposure, and suspiciousness.
+              Churn, rug exposure, and overall suspiciousness signals.
             </p>
-
             <div className="space-y-4">
-              {Object.entries(analysis.riskScores ?? {}).map(([key, value]) => (
+              {Object.entries(wa.riskScores ?? {}).map(([key, value]) => (
                 <div key={key}>
                   <div className="mb-1.5 flex items-center justify-between text-xs">
                     <span className="uppercase tracking-wider text-slate-500">
@@ -395,12 +421,12 @@ export default async function ProfilePage({
           </div>
         </div>
 
+        {/* Public signals / badges */}
         <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
-          <p className="mb-4 text-sm text-slate-400">Public Signals</p>
-
-          {(analysis.badges ?? []).length > 0 ? (
+          <p className="mb-4 text-sm text-slate-400">Signals</p>
+          {(wa.badges ?? []).length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {analysis.badges.map((badge) => {
+              {wa.badges.map((badge) => {
                 const meta = badgeMeta(badge);
                 return (
                   <span
@@ -414,11 +440,12 @@ export default async function ProfilePage({
             </div>
           ) : (
             <p className="text-sm italic text-slate-500">
-              No public signal badges available yet.
+              No signal badges available yet.
             </p>
           )}
         </div>
 
+        {/* Signal summary + behavioral layer */}
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
             <p className="mb-4 text-sm text-slate-400">Signal Summary</p>
@@ -428,7 +455,7 @@ export default async function ProfilePage({
                   Transactions
                 </p>
                 <p className="mt-2 text-lg font-semibold text-slate-200">
-                  {formatNumber(analysis.transactionCount)}
+                  {formatNumber(wa.transactionCount)}
                 </p>
               </div>
               <div>
@@ -436,7 +463,7 @@ export default async function ProfilePage({
                   Token Diversity
                 </p>
                 <p className="mt-2 text-lg font-semibold text-slate-200">
-                  {formatNumber(analysis.tokenDiversity)}
+                  {formatNumber(wa.tokenDiversity)}
                 </p>
               </div>
               <div>
@@ -444,7 +471,7 @@ export default async function ProfilePage({
                   Wallet Age
                 </p>
                 <p className="mt-2 text-lg font-semibold text-slate-200">
-                  {formatDays(analysis.approxWalletAge)}
+                  {formatDays(wa.approxWalletAge)}
                 </p>
               </div>
               <div>
@@ -452,7 +479,7 @@ export default async function ProfilePage({
                   Portfolio Value
                 </p>
                 <p className="mt-2 text-lg font-semibold text-slate-200">
-                  {formatUsd(analysis.portfolioValueUsd)}
+                  {formatUsd(wa.portfolioValueUsd)}
                 </p>
               </div>
             </div>
@@ -460,14 +487,13 @@ export default async function ProfilePage({
 
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
             <p className="mb-4 text-sm text-slate-400">Behavioral Layer</p>
-
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
                   Jeet Index
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-slate-200">
-                  {clampScore(analysis.behavioral?.jeetIndex)}
+                  {clampScore(wa.behavioral?.jeetIndex)}
                 </p>
               </div>
               <div>
@@ -475,7 +501,7 @@ export default async function ProfilePage({
                   Rug Exposure
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-slate-200">
-                  {clampScore(analysis.behavioral?.rugExposureIndex)}
+                  {clampScore(wa.behavioral?.rugExposureIndex)}
                 </p>
               </div>
               <div>
@@ -483,7 +509,7 @@ export default async function ProfilePage({
                   Avg Hold Time
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-slate-200">
-                  {formatHoldTime(analysis.behavioral?.avgHoldingTimeSec)}
+                  {formatHoldTime(wa.behavioral?.avgHoldingTimeSec)}
                 </p>
               </div>
               <div>
@@ -491,14 +517,14 @@ export default async function ProfilePage({
                   Trade Frequency
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-slate-200">
-                  {clampScore(analysis.behavioral?.tradeFreqScore)}
+                  {clampScore(wa.behavioral?.tradeFreqScore)}
                 </p>
               </div>
             </div>
 
-            {analysis.behavioral?.evidenceSources ? (
+            {wa.behavioral?.evidenceSources ? (
               <p className="mt-4 text-xs leading-6 text-slate-500">
-                Evidence Sources: {analysis.behavioral.evidenceSources}
+                Evidence Sources: {wa.behavioral.evidenceSources}
               </p>
             ) : null}
           </div>

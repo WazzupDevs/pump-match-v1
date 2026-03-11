@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServer } from "@/lib/supabase/server";
+import type { Database } from "@/types/supabase";
 import type {
   UserProfile,
   NetworkAgent,
@@ -122,27 +123,29 @@ export async function isUserRegistered(wallet: string): Promise<boolean> {
 }
 
 export async function upsertUser(wallet: string, partialData: UpsertUserData) {
-  const dbData: Record<string, unknown> = {
+  type UserInsert = Database["public"]["Tables"]["users"]["Insert"];
+
+  const dbData: UserInsert = {
     wallet_address: wallet,
     trust_score: partialData.trust_score,
     level: partialData.level,
     username: partialData.username,
-    active_badges: partialData.activeBadges,
-    social_proof: partialData.socialProof,
+    active_badges: partialData.activeBadges as UserInsert["active_badges"],
+    social_proof: partialData.socialProof as UserInsert["social_proof"],
     identity_state: partialData.identityState,
     is_opted_in: partialData.is_opted_in,
     intent: partialData.intent,
     tags: partialData.tags,
     joined_at: partialData.joined_at,
-    match_filters: partialData.match_filters,
-    social_links: partialData.social_links,
+    match_filters: partialData.match_filters as UserInsert["match_filters"],
+    social_links: partialData.social_links as UserInsert["social_links"],
     latest_snapshot_id: partialData.latest_snapshot_id,
     visibility_mode: partialData.visibility_mode,
     last_active_at: Date.now(),
   };
 
   // Remove undefined keys so Supabase doesn't null-out existing values
-  for (const key of Object.keys(dbData)) {
+  for (const key of Object.keys(dbData) as Array<keyof UserInsert>) {
     if (dbData[key] === undefined) {
       delete dbData[key];
     }
@@ -150,16 +153,17 @@ export async function upsertUser(wallet: string, partialData: UpsertUserData) {
 
   const supabase = writeClient();
   const { data, error } = await supabase
-    .from('users')
-    .upsert(dbData, { onConflict: 'wallet_address' })
+    .from("users")
+    .upsert(dbData, { onConflict: "wallet_address" })
     .select()
     .single();
 
   if (error) {
     // eslint-disable-next-line no-console
-    console.error('Supabase Upsert Error:', error);
+    console.error("Supabase Upsert Error:", error);
     return null;
   }
+
   return data;
 }
 

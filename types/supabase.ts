@@ -17,7 +17,55 @@ export type Database = {
       [_ in never]: never
     }
     Views: {
-      [_ in never]: never
+      v_public_receipts: {
+        Row: {
+          id: string | null
+          share_id: string
+          wallet_address: string
+          snapshot_id: string
+          visibility:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+          created_at: string | null
+          expires_at: string | null
+        }
+        Insert: {
+          [_ in never]: never
+        }
+        Update: {
+          [_ in never]: never
+        }
+        Relationships: []
+      }
+      v_wallet_latest_intelligence: {
+        Row: {
+          user_id: string
+          wallet_address: string
+          visibility_mode:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+            | null
+          latest_snapshot_id: string | null
+          style: Json | null
+          quality: Json | null
+          risk: Json | null
+          confidence: Json | null
+          summary: Json | null
+          sample_size: number | null
+          computed_at: number | null
+        }
+        Insert: {
+          [_ in never]: never
+        }
+        Update: {
+          [_ in never]: never
+        }
+        Relationships: []
+      }
     }
     Functions: {
       graphql: {
@@ -752,6 +800,90 @@ export type Database = {
           },
         ]
       }
+      score_snapshots: {
+        Row: {
+          id: string
+          wallet_address: string
+          model_version: string
+          score_window: string
+          style: Json
+          quality: Json
+          risk: Json
+          confidence: Json
+          summary: Json
+          sample_size: number
+          computed_at: number
+        }
+        Insert: {
+          id?: string
+          wallet_address: string
+          model_version: string
+          score_window: string
+          style: Json
+          quality: Json
+          risk: Json
+          confidence: Json
+          summary: Json
+          sample_size: number
+          computed_at: number
+        }
+        Update: {
+          id?: string
+          wallet_address?: string
+          model_version?: string
+          score_window?: string
+          style?: Json
+          quality?: Json
+          risk?: Json
+          confidence?: Json
+          summary?: Json
+          sample_size?: number
+          computed_at?: number
+        }
+        Relationships: []
+      }
+      wallet_receipts: {
+        Row: {
+          id: string
+          share_id: string
+          wallet_address: string
+          snapshot_id: string
+          visibility:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+          created_at: string
+          expires_at: string | null
+        }
+        Insert: {
+          id?: string
+          share_id: string
+          wallet_address: string
+          snapshot_id: string
+          visibility:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+          created_at?: string
+          expires_at?: string | null
+        }
+        Update: {
+          id?: string
+          share_id?: string
+          wallet_address?: string
+          snapshot_id?: string
+          visibility?:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+          created_at?: string
+          expires_at?: string | null
+        }
+        Relationships: []
+      }
       trust_metrics: {
         Row: {
           composite_score: number
@@ -764,6 +896,12 @@ export type Database = {
           tier: string
           updated_at: string
           user_id: string
+          latest_snapshot_id: string | null
+          primary_style: string | null
+          quality_overall: number | null
+          suspiciousness: number | null
+          confidence_tier: string | null
+          score_label: string | null
         }
         Insert: {
           composite_score?: number
@@ -776,6 +914,12 @@ export type Database = {
           tier?: string
           updated_at?: string
           user_id: string
+          latest_snapshot_id?: string | null
+          primary_style?: string | null
+          quality_overall?: number | null
+          suspiciousness?: number | null
+          confidence_tier?: string | null
+          score_label?: string | null
         }
         Update: {
           composite_score?: number
@@ -788,6 +932,12 @@ export type Database = {
           tier?: string
           updated_at?: string
           user_id?: string
+          latest_snapshot_id?: string | null
+          primary_style?: string | null
+          quality_overall?: number | null
+          suspiciousness?: number | null
+          confidence_tier?: string | null
+          score_label?: string | null
         }
         Relationships: [
           {
@@ -820,6 +970,13 @@ export type Database = {
           trust_score: number | null
           username: string | null
           wallet_address: string
+          visibility_mode:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+            | null
+          latest_snapshot_id: string | null
         }
         Insert: {
           active_badges?: Json | null
@@ -841,6 +998,13 @@ export type Database = {
           trust_score?: number | null
           username?: string | null
           wallet_address: string
+          visibility_mode?:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+            | null
+          latest_snapshot_id?: string | null
         }
         Update: {
           active_badges?: Json | null
@@ -862,6 +1026,13 @@ export type Database = {
           trust_score?: number | null
           username?: string | null
           wallet_address?: string
+          visibility_mode?:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+            | null
+          latest_snapshot_id?: string | null
         }
         Relationships: []
       }
@@ -897,7 +1068,54 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_public_receipts: {
+        Row: {
+          share_id: string
+          wallet_address: string
+          snapshot_id: string
+          visibility:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+          created_at: string | null
+          expires_at: string | null
+        }
+        Insert: {
+          [_ in never]: never
+        }
+        Update: {
+          [_ in never]: never
+        }
+        Relationships: []
+      }
+      v_wallet_latest_intelligence: {
+        Row: {
+          user_id: string
+          wallet_address: string
+          visibility_mode:
+            | "GHOST"
+            | "CLAIMED_PRIVATE"
+            | "PUBLIC"
+            | "VERIFIED_PUBLIC"
+            | null
+          latest_snapshot_id: string | null
+          style: Json | null
+          quality: Json | null
+          risk: Json | null
+          confidence: Json | null
+          summary: Json | null
+          sample_size: number | null
+          computed_at: number | null
+        }
+        Insert: {
+          [_ in never]: never
+        }
+        Update: {
+          [_ in never]: never
+        }
+        Relationships: []
+      }
     }
     Functions: {
       acquire_lock: {
@@ -1030,6 +1248,11 @@ export type Database = {
         | "revoked"
         | "kicked"
         | "left"
+      visibility_mode_t:
+        | "GHOST"
+        | "CLAIMED_PRIVATE"
+        | "PUBLIC"
+        | "VERIFIED_PUBLIC"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1179,6 +1402,12 @@ export const Constants = {
         "revoked",
         "kicked",
         "left",
+      ],
+      visibility_mode_t: [
+        "GHOST",
+        "CLAIMED_PRIVATE",
+        "PUBLIC",
+        "VERIFIED_PUBLIC",
       ],
     },
   },

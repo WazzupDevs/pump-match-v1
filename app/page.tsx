@@ -23,6 +23,7 @@ import {
   Medal,
   Search,
 } from "lucide-react";
+import { normalizeWalletAddress } from "@/lib/solana/normalizeWalletAddress";
 
 interface LeaderboardRow {
   rank: number;
@@ -174,12 +175,17 @@ export default function Home() {
   const { rows: leaderboard, loading: lbLoading } = useTopOperators(5);
   const router = useRouter();
   const [searchAddress, setSearchAddress] = useState("");
+  const [addressError, setAddressError] = useState("");
 
   const handleAnalyze = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchAddress.trim()) {
-      router.push(`/profile/${searchAddress.trim()}`);
+    setAddressError("");
+    const result = normalizeWalletAddress(searchAddress);
+    if (!result.ok) {
+      setAddressError("Invalid Solana wallet address.");
+      return;
     }
+    router.push(`/analyze/${result.address}`);
   };
 
   return (
@@ -245,7 +251,7 @@ export default function Home() {
               <input
                 type="text"
                 value={searchAddress}
-                onChange={(e) => setSearchAddress(e.target.value)}
+                onChange={(e) => { setSearchAddress(e.target.value); setAddressError(""); }}
                 placeholder="Enter a Solana wallet address"
                 className="min-w-0 flex-1 bg-transparent font-mono text-sm text-slate-200 placeholder:text-slate-600 outline-none"
                 spellCheck={false}
@@ -261,6 +267,9 @@ export default function Home() {
               </button>
             </div>
           </form>
+          {addressError && (
+            <p className="mt-2 text-xs text-rose-400">{addressError}</p>
+          )}
 
           {/* Secondary: connect / go to Command Center */}
           <div className="mt-4 flex flex-col items-center gap-2">

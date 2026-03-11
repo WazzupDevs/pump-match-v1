@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getReceiptByShareId } from "@/lib/receipts";
 
+/**
+ * /receipt/[shareId] — Canonical public share route. This is the preferred
+ * artifact for sharing wallet intelligence; /profile/[address] is a staged
+ * fallback when no receipt exists.
+ */
 type PageParams = {
   params: Promise<{ shareId: string }>;
 };
@@ -56,7 +61,8 @@ export async function generateMetadata({ params }: PageParams): Promise<Metadata
 
   return {
     title: `PumpMatch | Receipt ${shareId.slice(0, 6)}`,
-    description: "Public intelligence receipt for a Solana wallet on PumpMatch.",
+    description:
+      "Canonical public intelligence receipt for a Solana wallet on PumpMatch. This is the preferred share artifact.",
   };
 }
 
@@ -100,19 +106,20 @@ export default async function ReceiptPage({ params }: PageParams) {
               {maskedAddress}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
-              This page shows a published intelligence snapshot for this wallet. The URL is
+              Canonical public share for this wallet&apos;s intelligence. The URL is
               share-based and does not expose the raw address.
             </p>
             <p className="mt-2 text-xs text-slate-500">
               Snapshot computed at{" "}
               <span className="font-mono">
-                {computedAt.toLocaleString(undefined, {
+                {computedAt.toLocaleString("en-US", {
                   year: "numeric",
                   month: "short",
                   day: "2-digit",
                   hour: "2-digit",
                   minute: "2-digit",
-                })}
+                  timeZone: "UTC",
+                })} UTC
               </span>
               .
             </p>

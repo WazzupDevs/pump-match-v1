@@ -261,7 +261,7 @@ export function JoinNetworkModal({
         className="relative w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl border border-emerald-500/30 bg-zinc-900/90 backdrop-blur-xl shadow-[0_0_80px_rgba(16,185,129,0.15)] animate-in zoom-in-95 fade-in duration-200"
       >
         {/* Sticky header: Close button + Title + Description */}
-        <div className="sticky top-0 z-10 flex-shrink-0 border-b border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm">
+        <div className="sticky top-0 z-10 shrink-0 border-b border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm">
           <button
             type="button"
             onClick={() => {
@@ -432,7 +432,7 @@ export function JoinNetworkModal({
         </div>
 
         {/* Sticky footer: always visible above keyboard — NOT inside scroll */}
-        <div className="flex-shrink-0 border-t border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm px-6 md:px-8 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="shrink-0 border-t border-zinc-800/40 bg-zinc-900/95 backdrop-blur-sm px-6 md:px-8 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -448,7 +448,7 @@ export function JoinNetworkModal({
               type="button"
               onClick={handleConfirm}
               disabled={!canSubmit}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-sm font-semibold text-black hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150 shadow-lg shadow-emerald-500/20"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-sm font-semibold text-black hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150 shadow-lg shadow-emerald-500/20"
             >
               {isSubmitting && (
                 <Loader2 className="h-4 w-4 animate-spin" />

@@ -144,16 +144,16 @@ export function ArenaLeaderboard({
         {/* ── Section Header ── */}
         <div className="text-center mb-10">
           <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-400/60 mb-3">
-            The Arena
+            Behavioral Intelligence Arena
           </p>
           <h2 className="text-3xl md:text-4xl font-bold text-slate-100 mb-3">
-            <span className="bg-gradient-to-r from-yellow-400 via-emerald-400 to-purple-400 bg-clip-text text-transparent">
+            <span className="bg-linear-to-r from-yellow-400 via-emerald-400 to-purple-400 bg-clip-text text-transparent">
               Leaderboard
             </span>
           </h2>
           <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-            Discover Solana&apos;s highest-rated agents and verified squads
-            backed by verifiable, on-chain reputation signals.
+            Discover Solana&apos;s highest-signal agents and verified squads,
+            ranked on explainable behavioral intelligence instead of opaque trust scores.
           </p>
         </div>
 
@@ -195,7 +195,7 @@ export function ArenaLeaderboard({
                 onClick={() => setIsClaimOpen(true)}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-xs font-bold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 transition-[background-color,box-shadow,transform] shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.03] active:scale-[0.97]"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 min-h-[44px] text-xs font-bold text-slate-950 hover:from-emerald-400 hover:to-emerald-300 transition-[background-color,box-shadow,transform] shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.03] active:scale-[0.97]"
               >
                 <Rocket className="h-3.5 w-3.5" />
                 Claim Project

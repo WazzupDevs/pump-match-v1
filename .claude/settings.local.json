@@ -10,7 +10,10 @@
       "Bash(npx supabase db push)",
       "Bash(xxd)",
       "Bash(grep -v \"^$\")",
-      "Bash(npx tsc --noEmit --pretty false)"
+      "Bash(npx tsc --noEmit --pretty false)",
+      "Bash(grep -rn \"Analyze\\\\|analyze\" ./app/page.tsx ./components/profile --include=*.tsx)",
+      "Bash(npx next:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

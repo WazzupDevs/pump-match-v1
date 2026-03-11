@@ -7,6 +7,7 @@ import {
   getWalletBalances,
   searchAssets,
   type DasAsset,
+  type WalletBalancesResult,
 } from "@/lib/helius";
 import { getMatches } from "@/lib/match-engine";
 import {
@@ -26,6 +27,7 @@ import {
 import { checkRateLimit, RATE_LIMITS, getRedisClient } from "@/lib/rate-limiter";
 // SECURITY: Crypto helpers extracted to lib/signature.ts to avoid duplication
 import { verifyLegacySignature as verifyWalletSignature } from "@/lib/signature";
+import { normalizeWalletAddress } from "@/lib/solana/normalizeWalletAddress";
 import { headers } from "next/headers";
 import { isArchitect } from "@/lib/architect";
 import {
@@ -36,6 +38,7 @@ import {
 import type {
   AnalyzeWalletResult,
   AnalyzeWalletResponse,
+  AnalyzeWalletCoordinationProjection,
   Badge,
   BadgeCategory,
   BadgeId,
@@ -48,6 +51,8 @@ import type {
   UserIntent,
   UserProfile,
   WalletAnalysis,
+  WalletIntelligenceCanonical,
+  WalletIntelligenceCompatibilityProjection,
 } from "@/types";
 import { getTokenMarketSnapshot } from "@/lib/market-data";
 import { computeIntelligenceReport } from "@/lib/intelligence-engine";
@@ -126,27 +131,14 @@ async function setCachedAnalysis(key: string, value: CachedAnalysis): Promise<vo
 }
 
 /**
- * Production Grade: Solana Address Validation
- * Valid Solana addresses are base58-encoded, 32-44 characters.
- * Does NOT accept .sol domains (those should be resolved before calling this).
- */
-function isValidSolanaAddress(address: string): boolean {
-  // Base58 charset: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
-  const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-  return base58Regex.test(address);
-}
-
-/**
- * Universal address normalization: trims, strips "web3:solana:" prefix,
- * validates base58 format. Returns the clean address or throws.
+ * Universal address normalization: uses shared PublicKey-based validator.
+ * Trims, strips "web3:solana:" prefix, validates via PublicKey constructor.
  * DO NOT toLowerCase — Solana base58 is case-sensitive.
  */
 function normalizeAndValidateSolanaAddress(address: string): string {
-  let trimmed = address.trim();
-  if (trimmed.startsWith("web3:solana:")) trimmed = trimmed.slice("web3:solana:".length);
-  const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-  if (!base58Regex.test(trimmed)) throw new Error("Invalid Solana address format.");
-  return trimmed;
+  const result = normalizeWalletAddress(address);
+  if (!result.ok) throw new Error("Invalid Solana address format.");
+  return result.address;
 }
 
 function computeTokenCount(items: DasAsset[]): number {
@@ -339,11 +331,19 @@ export type OnchainCore = {
  * Pure data collection — no DB writes, no side-effects.
  */
 async function fetchOnchainCore(trimmed: string): Promise<OnchainCore> {
-  const [assetsByOwnerResult, solBalance, txData, balancesData] = await Promise.all([
+  const notFoundFallback: WalletBalancesResult = { ok: false, reason: "not_found" };
+  const [assetsByOwnerResult, solBalance, txData, balancesResult] = await Promise.all([
     getAssetsByOwner(trimmed),
     getSolBalance(trimmed),
     getWalletTransactionData(trimmed),
-    getWalletBalances(trimmed).catch(() => null),
+    getWalletBalances(trimmed).catch((err): WalletBalancesResult => {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[fetchOnchainCore] getWalletBalances threw for ${trimmed.slice(0, 8)}…:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return notFoundFallback;
+    }),
   ]);
 
   const transactionCount = txData.transactionCount;
@@ -411,7 +411,7 @@ async function fetchOnchainCore(trimmed: string): Promise<OnchainCore> {
     activityCount,
     pumpStats,
     approxWalletAgeDays: txData.approxWalletAgeDays,
-    portfolioValueUsd: balancesData?.totalUsdValue,
+    portfolioValueUsd: balancesResult.ok ? balancesResult.balances.totalUsdValue : undefined,
     scoreBreakdown,
     badges,
     fungibleMints: [...mintSet],
@@ -455,7 +455,9 @@ async function enrichWithMarketData(
 // Main Entry Point
 // ──────────────────────────────────────────────────────────────
 
+/** Options for analyzeWallet. Coordination-only: includePreviewMatches requests optional matches at response edge. */
 type AnalyzeWalletOptions = {
+  /** When true, attach optional coordination projection (matches) to response. Not part of intelligence output. */
   includePreviewMatches?: boolean;
 };
 
@@ -493,15 +495,16 @@ export async function analyzeWallet(
         ? { ...cachedWa, pumpStats: normalizedPs }
         : cachedWa;
 
-    let matches: MatchProfile[] | undefined;
+    // Coordination only: attach matches at response edge when requested (not part of intelligence).
+    let coordination: AnalyzeWalletCoordinationProjection | undefined;
     if (options?.includePreviewMatches) {
-      matches = getMatches(walletAnalysis);
+      coordination = { matches: getMatches(walletAnalysis) };
     }
 
     return {
       analysis: cached.response.analysis,
       walletAnalysis,
-      ...(matches ? { matches } : {}),
+      ...(coordination ?? {}),
     };
   }
 
@@ -545,6 +548,7 @@ export async function analyzeWallet(
           avgHoldingTimeSec: behavioralFeatures.avgHoldingTimeSec,
           tradeFreqScore: behavioralFeatures.tradeFreqScore,
           evidenceSources: behavioralFeatures.evidenceSources,
+          // Deprecated compatibility alias — kept only for existing consumers.
           confidenceLabel: behavioralFeatures.evidenceSources,
         }
       : undefined;
@@ -720,21 +724,16 @@ export async function analyzeWallet(
       };
     }
 
-    let walletAnalysis: WalletAnalysis = {
+    // ── Canonical intelligence layer (coordination-agnostic) ──
+    const canonicalWalletIntelligence: WalletIntelligenceCanonical = {
       address: trimmed,
       solBalance,
       tokenCount: fungibleTokens,
       nftCount: totalNfts,
       assetCount: totalAssets,
-      score: finalScore,
-      scoreLabel: finalScoreLabel,
-      trustScore: finalTrustScore,
-      badges: finalBadges,
       transactionCount,
       tokenDiversity,
       scoreBreakdown: finalScoreBreakdown,
-      systemScore: finalSystemScore,
-      socialScore: finalSocialScore,
       isRegistered,
       approxWalletAge: core.approxWalletAgeDays ?? undefined,
       pumpStats: normalizePumpStats(pumpStats),
@@ -756,19 +755,38 @@ export async function analyzeWallet(
       intelligenceReport: finalIntelligenceReport,
     };
 
+    // ── Transitional compatibility projection (legacy score/trust/badges) ──
+    const compatibilityProjection: WalletIntelligenceCompatibilityProjection = {
+      score: finalScore,
+      scoreLabel: finalScoreLabel,
+      trustScore: finalTrustScore,
+      badges: finalBadges,
+      systemScore: finalSystemScore,
+      socialScore: finalSocialScore,
+    };
+
+    let walletAnalysis: WalletAnalysis = {
+      ...canonicalWalletIntelligence,
+      ...compatibilityProjection,
+    };
+
     // ── V8 Stage 3: Enrich with market data (stub — no-op for now) ──
     walletAnalysis = await enrichWithMarketData(walletAnalysis, core);
 
-    // Match Engine: Calculate matches (read-only, mock data for preview)
-    let matches: MatchProfile[] | undefined;
+    // ── Optional coordination projection: only when requested, attached at response edge ──
+    let coordination: AnalyzeWalletCoordinationProjection | undefined;
     if (options?.includePreviewMatches) {
-      matches = getMatches(walletAnalysis);
+      coordination = { matches: getMatches(walletAnalysis) };
     }
 
-    const response: AnalyzeWalletResponse = {
+    // ── Response assembly: canonical + compatibility (+ optional coordination) ──
+    const baseResponse: AnalyzeWalletResponse = {
       analysis: analysisResult,
       walletAnalysis,
-      ...(matches ? { matches } : {}),
+    };
+    const response: AnalyzeWalletResponse = {
+      ...baseResponse,
+      ...(coordination ?? {}),
     };
 
     // Production Grade: Store in Redis (or in-memory fallback for dev)
@@ -784,9 +802,17 @@ export async function analyzeWallet(
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(`[analyzeWallet] Exception for ${trimmed}:`, error);
-    throw new Error(
-      `Failed to analyze wallet: ${error instanceof Error ? error.message : String(error)}`,
-    );
+
+    // Sanitize: never forward raw internal messages to the client.
+    // Rate-limit errors are re-thrown with a safe user-facing message.
+    const rawMsg = error instanceof Error ? error.message : "";
+    const isRateLimit = rawMsg.includes("Rate limit") || rawMsg.includes("429");
+
+    if (isRateLimit) {
+      throw new Error("Rate limit exceeded. Please wait before analyzing again.");
+    }
+
+    throw new Error("Analysis temporarily unavailable. Please try again.");
   }
 }
 

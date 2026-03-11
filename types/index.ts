@@ -32,6 +32,8 @@ export type {
   ArenaBridgeFields,
 };
 
+export * from "./public-intelligence";
+
 export type BadgeId =
   | "whale"
   | "dev"
@@ -149,31 +151,17 @@ export type SocialLinks = {
 };
 
 // Intelligence Core V2: wallet-level intelligence snapshot (coordination-agnostic).
-// Coordination metadata (like intent) lives on UserProfile, not here.
-export type WalletAnalysis = {
+// Coordination metadata (like intent) lives on UserProfile, not here; any intent on
+// WalletAnalysis is strictly a deprecated coordination projection.
+export type WalletIntelligenceCanonical = {
   address: string;
   solBalance: number;
   tokenCount: number;
   nftCount: number;
   assetCount: number;
-  /** @deprecated Legacy scalar score; v2 should prefer intelligenceReport.snapshot. */
-  score: number;
-  /** @deprecated Legacy label; v2 should prefer intelligenceReport.snapshot.summary.scoreLabel. */
-  scoreLabel: string;
-  /** @deprecated Legacy trust score; v2 should prefer intelligenceReport.legacyTrustScore. */
-  trustScore: number;
-  badges: BadgeId[];
   transactionCount: number;
   tokenDiversity: number;
   scoreBreakdown: ScoreBreakdown;
-  // Pump Match - Calculated scores
-  systemScore: number; // System rozetlerinin toplamı
-  socialScore: number; // Decay uygulanmış sosyal skor
-  /**
-   * @deprecated Coordination-layer intent. Canonical location is UserProfile.intent,
-   * not the wallet intelligence surface. Kept for backward compatibility only.
-   */
-  intent?: UserIntent;
   // Opt-In Network Architecture
   isRegistered: boolean; // Is this wallet in the network registry?
   // Production Grade: Wallet age in days (from first activity, NOT creation date)
@@ -194,6 +182,49 @@ export type WalletAnalysis = {
   // Intelligence Core V2: canonical report snapshot (Phase 2+)
   intelligenceReport?: IntelligenceReport;
 };
+
+/**
+ * Transitional compatibility projection that keeps legacy score/trust/badge
+ * fields available for existing consumers while Intelligence Core v2 rolls out.
+ */
+export type WalletIntelligenceCompatibilityProjection = {
+  /** @deprecated Legacy scalar score; v2 should prefer intelligenceReport.snapshot. */
+  score: number;
+  /** @deprecated Legacy label; v2 should prefer intelligenceReport.snapshot.summary.scoreLabel. */
+  scoreLabel: string;
+  /** @deprecated Transitional trust score; v2 should prefer intelligenceReport.legacyTrustScore. */
+  trustScore: number;
+  // Pump Match - Calculated scores / badges (presentation-layer heuristics)
+  badges: BadgeId[];
+  systemScore: number; // System rozetlerinin toplamı
+  socialScore: number; // Decay uygulanmış sosyal skor
+};
+
+/**
+ * Optional coordination-layer projection. New flows should treat coordination
+ * state (intent, matches, etc.) as separate from canonical wallet intelligence.
+ * intent is a deprecated coordination mirror only; canonical intent lives on UserProfile.
+ */
+export type WalletIntelligenceCoordinationProjection = {
+  /**
+   * @deprecated Coordination-layer mirror only. Canonical location is UserProfile.intent.
+   * Not part of wallet intelligence; kept for backward compatibility (e.g. joinNetwork).
+   */
+  intent?: UserIntent;
+};
+
+/**
+ * WalletAnalysis is the legacy aggregate surface that merges:
+ * - canonical intelligence output (WalletIntelligenceCanonical)
+ * - transitional compatibility projection (WalletIntelligenceCompatibilityProjection)
+ * - optional coordination projection (WalletIntelligenceCoordinationProjection)
+ *
+ * New code should prefer targeting the narrower helper types where possible.
+ * Allowed transitional inventory: see MIGRATION-V2-HARDENING.md.
+ */
+export type WalletAnalysis = WalletIntelligenceCanonical &
+  WalletIntelligenceCompatibilityProjection &
+  WalletIntelligenceCoordinationProjection;
 
 // Re-export MarketSnapshot from types for convenience (canonical definition in lib/market-data.ts)
 export type MarketSnapshot = {
@@ -300,13 +331,23 @@ export type NetworkAgent = {
   tags: string[];
 };
 
+/** Optional coordination projection for analyzeWallet. Attached only when includePreviewMatches is true. Not part of intelligence output. See MIGRATION-V2-HARDENING.md. */
+export type AnalyzeWalletCoordinationProjection = {
+  matches?: MatchProfile[];
+};
+
 export type AnalyzeWalletResponse = {
+  /** Lightweight aggregate metrics (legacy surface), kept for UI compatibility. */
   analysis: AnalyzeWalletResult;
+  /**
+   * Canonical wallet intelligence + compatibility projection.
+   * See WalletIntelligenceCanonical and WalletIntelligenceCompatibilityProjection
+   * for the layered breakdown.
+   */
   walletAnalysis: WalletAnalysis; // Pump Match - Full analysis sent to client
   /**
-   * @deprecated Preview matches are a legacy coordination layer concern and
-   * are not part of the canonical Intelligence Core v2 response. This field
-   * is optional and may be omitted when matches are not requested.
+   * Optional coordination projection (see AnalyzeWalletCoordinationProjection).
+   * Present only when includePreviewMatches was true. Not part of Intelligence Core v2.
    */
   matches?: MatchProfile[];
 };

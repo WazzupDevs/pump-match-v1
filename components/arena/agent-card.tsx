@@ -269,11 +269,11 @@ export function AgentCard({
           signature: bs58.encode(signatureBytes),
         });
 
-        if (result.success) {
+        if (result?.success) {
           setInviteState("success");
           onInvited?.(targetWallet);
         } else {
-          setInviteError(result.message || "Invite failed.");
+          setInviteError(result?.message ?? "Action failed.");
           setInviteState("error");
         }
       } catch (err) {
@@ -400,29 +400,25 @@ export function AgentCard({
               </span>
             </div>
 
-            <div className="min-w-0 flex-1">
-  <div className="flex items-center gap-2">
-    <span className="truncate text-sm font-bold text-slate-100">
-      {agent.username}
-    </span>
-
-    {agent.identityState === "VERIFIED" ? (
-      <span className="inline-flex items-center gap-1 rounded-full border border-slate-600/30 bg-slate-800/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-300">
-        <ShieldCheck className="h-3 w-3" />
-        Verified
-      </span>
-    ) : null}
-  </div>
-
-  <div className="mt-1 flex flex-wrap items-center gap-2">
-    <span className="font-mono text-[11px] text-slate-500">
-      {formatAddress(agent.address)}
-    </span>
-    <span className="rounded-full border border-slate-700/60 bg-slate-800/60 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-      {signalLabel(displayScore)}
-    </span>
-  </div>
-</div>
+            {(agent.primaryStyle || agent.scoreLabel || agent.confidenceTier) && (
+              <div className="mt-2 space-y-1">
+                {agent.primaryStyle ? (
+                  <p className="text-xs font-medium text-emerald-300">
+                    {agent.primaryStyle}
+                  </p>
+                ) : null}
+                {agent.scoreLabel ? (
+                  <p className="text-[11px] text-slate-400">
+                    {agent.scoreLabel}
+                  </p>
+                ) : null}
+                {agent.confidenceTier ? (
+                  <span className="inline-flex items-center rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-cyan-200">
+                    Confidence {agent.confidenceTier}
+                  </span>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
       </div>

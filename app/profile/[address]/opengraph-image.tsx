@@ -1,101 +1,475 @@
 import { ImageResponse } from "next/og";
-import { analyzeWallet } from "@/app/actions/analyzeWallet";
+import { getLatestPublicReceipt } from "@/lib/receipts";
+import {
+  getPublicProfileByWallet,
+  getPublicReceiptSurface,
+  isValidPublicWalletAddress,
+  normalizePublicWalletAddress,
+} from "@/lib/public-intelligence";
 
 export const runtime = "nodejs";
-export const size = { width: 1200, height: 630 };
+export const alt = "PumpMatch Public Intelligence";
+export const size = {
+  width: 1200,
+  height: 630,
+};
 export const contentType = "image/png";
 
-const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-
-type AnalysisResult = {
-  trustScore?: number;
-  scoreLabel?: string;
-  badges?: string[];
-  behavioral?: {
-    confidenceLabel?: string;
-  };
-};
-
-function clampScore(value?: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value as number)));
+function baseCard(children: React.ReactNode) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        background:
+          "radial-gradient(circle at top, rgba(16,185,129,0.10), transparent 24%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.08), transparent 18%), radial-gradient(circle at 50% 100%, rgba(34,211,238,0.06), transparent 20%), #020617",
+        color: "#f8fafc",
+        padding: 48,
+        fontFamily:
+          'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          height: "100%",
+          borderRadius: 28,
+          border: "1px solid rgba(148,163,184,0.18)",
+          background: "rgba(15,23,42,0.72)",
+          boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
+          padding: 36,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function shortenAddress(address: string) {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
-function badgeLabel(badge: string) {
-  switch (badge) {
-    case "diamond_hands":
-      return "Diamond Hands";
-    case "mega_jeet":
-      return "High Churn";
-    case "rug_magnet":
-      return "Rug Exposure";
-    case "whale":
-      return "Whale";
-    case "dev":
-      return "Builder";
-    case "og_wallet":
-      return "OG Wallet";
-    case "community_trusted":
-      return "Community Trusted";
-    default:
-      return badge;
-  }
+function clampScore(value?: number | null) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value as number)));
 }
 
-function scoreTone(score: number) {
-  if (score >= 80) {
-    return {
-      ring: "#34d399",
-      text: "#a7f3d0",
-      glow: "rgba(52, 211, 153, 0.18)",
-    };
-  }
-
-  if (score >= 50) {
-    return {
-      ring: "#f59e0b",
-      text: "#fde68a",
-      glow: "rgba(245, 158, 11, 0.16)",
-    };
-  }
-
-  return {
-    ring: "#fb7185",
-    text: "#fecdd3",
-    glow: "rgba(251, 113, 133, 0.16)",
-  };
+function toneColor(score: number) {
+  if (score >= 80) return "#6ee7b7";
+  if (score >= 50) return "#fcd34d";
+  return "#fda4af";
 }
 
-function renderRing(score: number, color: string) {
-  const radius = 58;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
+function renderGenericCard(title: string, subtitle: string) {
+  return new ImageResponse(
+    baseCard(
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          width: "100%",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div
+            style={{
+              fontSize: 18,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: "rgba(52,211,153,0.85)",
+              fontWeight: 700,
+            }}
+          >
+            PumpMatch
+          </div>
+          <div
+            style={{
+              fontSize: 52,
+              lineHeight: 1.05,
+              fontWeight: 800,
+              maxWidth: 860,
+            }}
+          >
+            {title}
+          </div>
+          <div
+            style={{
+              fontSize: 24,
+              lineHeight: 1.5,
+              color: "rgba(226,232,240,0.78)",
+              maxWidth: 860,
+            }}
+          >
+            {subtitle}
+          </div>
+        </div>
 
-  return (
-    <svg
-      width="140"
-      height="140"
-      viewBox="0 0 140 140"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle cx="70" cy="70" r={radius} stroke="#1e293b" strokeWidth="12" />
-      <circle
-        cx="70"
-        cy="70"
-        r={radius}
-        stroke={color}
-        strokeWidth="12"
-        strokeLinecap="round"
-        strokeDasharray={`${circumference} ${circumference}`}
-        strokeDashoffset={offset}
-        transform="rotate(-90 70 70)"
-      />
-    </svg>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: 20,
+            color: "rgba(148,163,184,0.85)",
+          }}
+        >
+          <div style={{ display: "flex", gap: 12 }}>
+            <span>Behavioral Intelligence for Solana</span>
+          </div>
+          <div>Canonical share is via receipt link</div>
+        </div>
+      </div>
+    ),
+    size,
+  );
+}
+
+function renderReceiptCard(receipt: Awaited<ReturnType<typeof getPublicReceiptSurface>> extends infer T
+  ? T extends null
+    ? never
+    : T
+  : never) {
+  const trustScore = clampScore(receipt.trustScore);
+  const color = toneColor(trustScore);
+
+  return new ImageResponse(
+    baseCard(
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          justifyContent: "space-between",
+          gap: 28,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            flex: 1,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                fontSize: 18,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                color: "rgba(52,211,153,0.85)",
+                fontWeight: 700,
+              }}
+            >
+              Public Intelligence Receipt
+            </div>
+
+            <div
+              style={{
+                fontSize: 26,
+                color: "rgba(148,163,184,0.9)",
+                fontWeight: 600,
+              }}
+            >
+              {shortenAddress(receipt.walletAddress)}
+            </div>
+
+            <div
+              style={{
+                fontSize: 54,
+                lineHeight: 1.05,
+                fontWeight: 800,
+                maxWidth: 720,
+              }}
+            >
+              {receipt.intelligenceSummary.primaryStyle || "Visible Intelligence"}
+            </div>
+
+            <div
+              style={{
+                fontSize: 24,
+                lineHeight: 1.4,
+                color: "rgba(226,232,240,0.88)",
+                fontWeight: 600,
+              }}
+            >
+              {receipt.intelligenceSummary.scoreLabel}
+            </div>
+
+            <div
+              style={{
+                fontSize: 22,
+                lineHeight: 1.45,
+                color: "rgba(203,213,225,0.76)",
+                maxWidth: 720,
+              }}
+            >
+              {receipt.intelligenceSummary.summary}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 14, marginTop: 24 }}>
+            <div
+              style={{
+                display: "flex",
+                padding: "10px 16px",
+                borderRadius: 999,
+                border: "1px solid rgba(34,211,238,0.25)",
+                background: "rgba(6,182,212,0.10)",
+                color: "#bae6fd",
+                fontSize: 18,
+                fontWeight: 700,
+              }}
+            >
+              Confidence {receipt.intelligenceConfidence.tier}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                padding: "10px 16px",
+                borderRadius: 999,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "rgba(30,41,59,0.75)",
+                color: "#cbd5e1",
+                fontSize: 18,
+                fontWeight: 700,
+              }}
+            >
+              Sample {receipt.intelligenceConfidence.sampleSize}
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            width: 250,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 18,
+              color: "rgba(148,163,184,0.85)",
+              textAlign: "right",
+            }}
+          >
+            Compatibility Public Score
+          </div>
+          <div
+            style={{
+              fontSize: 120,
+              lineHeight: 1,
+              fontWeight: 900,
+              letterSpacing: "-0.06em",
+              color,
+            }}
+          >
+            {trustScore}
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              color: "rgba(148,163,184,0.85)",
+              textAlign: "right",
+            }}
+          >
+            Canonical public share
+          </div>
+        </div>
+      </div>
+    ),
+    size,
+  );
+}
+
+function renderProfileCard(profile: Awaited<ReturnType<typeof getPublicProfileByWallet>> extends infer T
+  ? T extends { ok: true; profile: infer P }
+    ? P
+    : never
+  : never) {
+  const trustScore = clampScore(profile.trustScore);
+  const color = toneColor(trustScore);
+
+  return new ImageResponse(
+    baseCard(
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          justifyContent: "space-between",
+          gap: 28,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            flex: 1,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                fontSize: 18,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                color: "rgba(52,211,153,0.85)",
+                fontWeight: 700,
+              }}
+            >
+              Public Intelligence Preview (staged fallback)
+            </div>
+
+            <div
+              style={{
+                fontSize: 26,
+                color: "rgba(148,163,184,0.9)",
+                fontWeight: 600,
+              }}
+            >
+              {shortenAddress(profile.address)}
+            </div>
+
+            <div
+              style={{
+                fontSize: 54,
+                lineHeight: 1.05,
+                fontWeight: 800,
+                maxWidth: 720,
+              }}
+            >
+              {profile.intelligenceSummary?.primaryStyle ?? "Visible Intelligence"}
+            </div>
+
+            <div
+              style={{
+                fontSize: 24,
+                lineHeight: 1.4,
+                color: "rgba(226,232,240,0.88)",
+                fontWeight: 600,
+              }}
+            >
+              {profile.intelligenceSummary?.scoreLabel ?? "Public intelligence surface"}
+            </div>
+
+            <div
+              style={{
+                fontSize: 22,
+                lineHeight: 1.45,
+                color: "rgba(203,213,225,0.76)",
+                maxWidth: 720,
+              }}
+            >
+              {profile.intelligenceSummary?.summary ??
+                "Persisted public intelligence for this wallet is available on PumpMatch."}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 14, marginTop: 24 }}>
+            {profile.intelligenceConfidence ? (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    padding: "10px 16px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(34,211,238,0.25)",
+                    background: "rgba(6,182,212,0.10)",
+                    color: "#bae6fd",
+                    fontSize: 18,
+                    fontWeight: 700,
+                  }}
+                >
+                  Confidence {profile.intelligenceConfidence.tier}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    padding: "10px 16px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(148,163,184,0.22)",
+                    background: "rgba(30,41,59,0.75)",
+                    color: "#cbd5e1",
+                    fontSize: 18,
+                    fontWeight: 700,
+                  }}
+                >
+                  Sample {profile.intelligenceConfidence.sampleSize}
+                </div>
+              </>
+            ) : null}
+
+            {profile.behavioral?.evidenceSources ? (
+              <div
+                style={{
+                  display: "flex",
+                  padding: "10px 16px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(16,185,129,0.24)",
+                  background: "rgba(16,185,129,0.10)",
+                  color: "#bbf7d0",
+                  fontSize: 18,
+                  fontWeight: 700,
+                  maxWidth: 420,
+                }}
+              >
+                Evidence {profile.behavioral.evidenceSources}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          style={{
+            width: 250,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 14,
+              color: "rgba(148,163,184,0.75)",
+              textAlign: "right",
+            }}
+          >
+            Compatibility (transitional)
+          </div>
+          <div
+            style={{
+              fontSize: 88,
+              lineHeight: 1,
+              fontWeight: 900,
+              letterSpacing: "-0.06em",
+              color,
+            }}
+          >
+            {trustScore}
+          </div>
+          <div
+            style={{
+              fontSize: 16,
+              color: "rgba(148,163,184,0.75)",
+              textAlign: "right",
+            }}
+          >
+            Staged fallback when no receipt shared
+          </div>
+        </div>
+      </div>
+    ),
+    size,
   );
 }
 
@@ -105,270 +479,31 @@ export default async function Image({
   params: Promise<{ address: string }>;
 }) {
   const { address: rawAddress } = await params;
-  const address = (rawAddress ?? "").trim();
+  const address = normalizePublicWalletAddress(rawAddress);
 
-  if (!BASE58_RE.test(address)) {
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#020617",
-            color: "#f87171",
-            fontSize: 42,
-            fontWeight: 800,
-            fontFamily: "sans-serif",
-          }}
-        >
-          INVALID ADDRESS
-        </div>
-      ),
-      size
+  if (!isValidPublicWalletAddress(address)) {
+    return renderGenericCard(
+      "Invalid address",
+      "PumpMatch public intelligence preview requires a valid Solana wallet address. Canonical share is via receipt link.",
     );
   }
 
-  let analysis: AnalysisResult | null = null;
-
-  try {
-    const result = await analyzeWallet(address);
-    analysis = (result?.walletAnalysis ?? null) as AnalysisResult | null;
-  } catch {
-    analysis = null;
+  const latestReceipt = await getLatestPublicReceipt(address);
+  if (latestReceipt) {
+    const receipt = await getPublicReceiptSurface(latestReceipt.shareId);
+    if (receipt) {
+      return renderReceiptCard(receipt);
+    }
   }
 
-  const score = clampScore(analysis?.trustScore);
-  const tone = scoreTone(score);
-  const badges = (analysis?.badges ?? []).slice(0, 3).map(badgeLabel);
-  const confidence =
-    analysis?.behavioral?.confidenceLabel ??
-    analysis?.scoreLabel ??
-    "Public behavioral surface";
+  const result = await getPublicProfileByWallet(address);
 
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          background:
-            "linear-gradient(180deg, #020617 0%, #08111f 55%, #0f172a 100%)",
-          padding: "56px",
-          fontFamily: "sans-serif",
-          color: "#e2e8f0",
-          position: "relative",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(circle at top, rgba(16,185,129,0.10), transparent 26%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.08), transparent 18%)",
-          }}
-        />
+  if (!result.ok) {
+    return renderGenericCard(
+      "Public intelligence unavailable",
+      "No public receipt or staged profile for this wallet. Publish a receipt for the canonical share.",
+    );
+  }
 
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              fontSize: 24,
-              letterSpacing: 3,
-              fontWeight: 800,
-              color: "#94a3b8",
-            }}
-          >
-            PUMPMATCH
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              padding: "10px 16px",
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.04)",
-              fontSize: 18,
-              color: "#cbd5e1",
-              fontFamily: "monospace",
-            }}
-          >
-            {shortenAddress(address)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 40,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              maxWidth: 700,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                marginBottom: 14,
-                fontSize: 14,
-                textTransform: "uppercase",
-                letterSpacing: 3,
-                color: "#86efac",
-              }}
-            >
-              Public Behavioral Analysis
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                fontSize: 62,
-                lineHeight: 1,
-                fontWeight: 800,
-                letterSpacing: -2,
-                color: "#f8fafc",
-              }}
-            >
-              <span>Behavioral Intelligence</span>
-              <span style={{ color: "#94a3b8" }}>for Solana</span>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                marginTop: 18,
-                fontSize: 24,
-                lineHeight: 1.5,
-                color: "#94a3b8",
-              }}
-            >
-              Explainable public signals for wallet behavior, quality, risk, and confidence.
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 12,
-                marginTop: 24,
-              }}
-            >
-              {(badges.length > 0 ? badges : ["Public Signals", "Masked Identity", confidence]).map(
-                (item) => (
-                  <div
-                    key={item}
-                    style={{
-                      display: "flex",
-                      padding: "10px 14px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(255,255,255,0.04)",
-                      fontSize: 16,
-                      color: "#cbd5e1",
-                    }}
-                  >
-                    {item}
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-
-          <div
-            style={{
-              position: "relative",
-              width: 220,
-              height: 220,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                width: 180,
-                height: 180,
-                borderRadius: 999,
-                background: tone.glow,
-                filter: "blur(28px)",
-              }}
-            />
-            <div style={{ position: "relative", display: "flex" }}>
-              {renderRing(score, tone.ring)}
-            </div>
-            <div
-              style={{
-                position: "absolute",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 54,
-                  fontWeight: 800,
-                  lineHeight: 1,
-                  color: tone.text,
-                }}
-              >
-                {score}
-              </div>
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 12,
-                  letterSpacing: 2,
-                  textTransform: "uppercase",
-                  color: "#94a3b8",
-                }}
-              >
-                Public Score Surface
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: 16,
-            color: "#64748b",
-          }}
-        >
-          <div style={{ display: "flex" }}>
-            PumpMatch · Behavioral Intelligence for Solana
-          </div>
-          <div style={{ display: "flex" }}>{confidence}</div>
-        </div>
-      </div>
-    ),
-    size
-  );
+  return renderProfileCard(result.profile);
 }

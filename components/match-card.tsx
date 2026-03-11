@@ -209,11 +209,11 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
   const identityGlowClass = getIdentityGlowClass(profile.identityState);
 
   return (
-    <div className={`rounded-xl border bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 p-5 shadow-lg transition-colors duration-300 relative ${identityGlowClass}`}>
+    <div className={`rounded-xl border bg-linear-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 p-5 shadow-lg transition-colors duration-300 relative ${identityGlowClass}`}>
       {/* Header: Avatar + Username + Confidence Badge */}
       <div className="flex items-start gap-3 mb-4">
         <div
-          className="h-12 w-12 rounded-full flex items-center justify-center text-white font-semibold text-lg shadow-lg flex-shrink-0"
+          className="h-12 w-12 rounded-full flex items-center justify-center text-white font-semibold text-lg shadow-lg shrink-0"
           style={{ backgroundColor: avatarColor }}
         >
           {profile.username.charAt(0).toUpperCase()}
@@ -225,14 +225,14 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
               {/* Identity Hierarchy Badge - CTO Tuning */}
               {profile.identityState && (
                 <span
-                  className={`text-xs font-medium ${identityBadge.color} flex items-center gap-1 flex-shrink-0`}
+                  className={`text-xs font-medium ${identityBadge.color} flex items-center gap-1 shrink-0`}
                   title={identityBadge.label}
                 >
                   {identityBadge.icon}
                 </span>
               )}
               {/* Social Proof Badges */}
-              <div className="flex items-center gap-1.5 flex-shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 {profile.socialProof.verified && (
                   <div
                     className="flex items-center gap-0.5"
@@ -270,7 +270,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
             </div>
             {/* Confidence Badge - Transparent Tooltip */}
             <div
-              className={`rounded-lg border ${confidenceColors.border} ${confidenceColors.bg} px-2 py-1 flex-shrink-0 cursor-help relative group`}
+              className={`rounded-lg border ${confidenceColors.border} ${confidenceColors.bg} px-2 py-1 shrink-0 cursor-help relative group`}
             >
               <span className={`text-xs font-bold min-w-[24px] tabular-nums tracking-tight ${confidenceColors.text}`}>
                 {profile.matchConfidence}%
@@ -374,10 +374,10 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
           <div
             className={`h-full rounded-full transition-colors duration-500 ${
               profile.trustScore >= 80
-                ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                ? "bg-linear-to-r from-emerald-500 to-emerald-400"
                 : profile.trustScore >= 50
-                ? "bg-gradient-to-r from-amber-500 to-amber-400"
-                : "bg-gradient-to-r from-rose-500 to-rose-400"
+                ? "bg-linear-to-r from-amber-500 to-amber-400"
+                : "bg-linear-to-r from-rose-500 to-rose-400"
             }`}
             style={{ width: `${profile.trustScore}%` }}
           />
@@ -423,7 +423,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
                     }`}
                   >
                     <IconComponent
-                      className={`h-3.5 w-3.5 flex-shrink-0 ${
+                      className={`h-3.5 w-3.5 shrink-0 ${
                         isPositive ? "text-emerald-400" : "text-slate-600"
                       }`}
                     />
@@ -455,7 +455,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
             if (!tip) return null;
             return (
               <div className="mt-2 flex items-start gap-1.5 px-2 py-1.5 rounded-md bg-amber-500/5 border border-amber-500/10">
-                <Info className="h-3 w-3 text-amber-400/60 flex-shrink-0 mt-0.5" />
+                <Info className="h-3 w-3 text-amber-400/60 shrink-0 mt-0.5" />
                 <p className="text-[10px] text-amber-400/70 leading-tight italic">
                   {tip}
                 </p>
@@ -534,7 +534,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
                 : "border-amber-500/30 bg-amber-500/5 text-amber-400 hover:bg-amber-500/15 hover:border-amber-500/50"
             }`}
           >
-            <ShieldCheck className="h-4 w-4 flex-shrink-0" />
+            <ShieldCheck className="h-4 w-4 shrink-0" />
             <span className="hidden sm:inline text-xs">
               {endorseState === "pending" ? "..." :
                endorseState === "success" ? "Endorsed" :
@@ -556,7 +556,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm text-sky-400 hover:text-sky-300 transition-colors"
             >
-              <Twitter className="h-3.5 w-3.5 flex-shrink-0" />
+              <Twitter className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">@{profile.socialLinks.twitter}</span>
             </a>
           )}
@@ -567,7 +567,7 @@ export function MatchCard({ profile, userIntent, onConnect, onEndorse, isOptedIn
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
             >
-              <Send className="h-3.5 w-3.5 flex-shrink-0" />
+              <Send className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">@{profile.socialLinks.telegram}</span>
             </a>
           )}

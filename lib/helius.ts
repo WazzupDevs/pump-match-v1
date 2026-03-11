@@ -302,19 +302,29 @@ export async function getAsset(mintAddress: string): Promise<HeliusAssetInfo | n
 // GET /v1/wallet/{address}/balances
 // Returns totalUsdValue aggregated across all priced tokens.
 // Pricing covers top 10K tokens by market cap, updated hourly.
-// Non-critical: returns null on any failure — never throws.
+//
+// Return contract:
+//   { ok: true, balances }  — success
+//   { ok: false, reason }   — non-fatal classified failure
+//   throws                  — 5xx / network timeout (caller must handle)
 // ──────────────────────────────────────────────────────────────
+
+export type WalletBalances = { totalUsdValue: number };
+
+export type WalletBalancesResult =
+  | { ok: true; balances: WalletBalances }
+  | { ok: false; reason: "not_found" | "rate_limited" };
 
 const WALLET_BALANCES_TIMEOUT_MS = 8000;
 
 export async function getWalletBalances(
   address: string,
-): Promise<{ totalUsdValue: number } | null> {
+): Promise<WalletBalancesResult> {
   const apiKey = HELIUS_API_KEY;
   if (!apiKey) {
     // eslint-disable-next-line no-console
-    console.error("[getWalletBalances] HELIUS_API_KEY not configured.");
-    return null;
+    console.warn("[getWalletBalances] HELIUS_API_KEY not configured.");
+    return { ok: false, reason: "not_found" };
   }
 
   const url = new URL(
@@ -324,6 +334,8 @@ export async function getWalletBalances(
   url.searchParams.set("showNfts", "false");
   url.searchParams.set("showZeroBalance", "false");
   url.searchParams.set("showNative", "true");
+
+  let lastFailureMode: "rate_limited" | "server_error" = "rate_limited";
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     // Recreate AbortController per attempt so retries get a fresh signal
@@ -346,13 +358,22 @@ export async function getWalletBalances(
             ? json.totalUsdValue
             : Number(json.totalUsdValue);
 
-        if (!Number.isFinite(total)) return null;
+        if (!Number.isFinite(total)) return { ok: false, reason: "not_found" };
 
         // 0 is a valid portfolio value (empty wallet)
-        return { totalUsdValue: total };
+        return { ok: true, balances: { totalUsdValue: total } };
       }
 
+      // 404 → wallet has no balance data or endpoint miss (non-fatal)
+      if (res.status === 404) {
+        // eslint-disable-next-line no-console
+        console.warn(`[getWalletBalances] 404 for ${address.slice(0, 8)}… — no balance data`);
+        return { ok: false, reason: "not_found" };
+      }
+
+      // 429 → rate limit — retry with backoff, then return typed failure
       if (res.status === 429) {
+        lastFailureMode = "rate_limited";
         const retryAfter = res.headers.get("Retry-After");
         const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.pow(2, attempt) * 1000;
         // eslint-disable-next-line no-console
@@ -361,18 +382,20 @@ export async function getWalletBalances(
         continue;
       }
 
+      // 5xx → upstream failure — retry, then throw after exhaustion
       if (res.status >= 500) {
+        lastFailureMode = "server_error";
         const delay = Math.pow(2, attempt) * 1000;
         // eslint-disable-next-line no-console
-        console.warn(`[getWalletBalances] ${res.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        console.error(`[getWalletBalances] ${res.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }
 
-      // Client error — do not retry
+      // Other client errors (400, 401, etc.) — non-fatal, do not retry
       // eslint-disable-next-line no-console
-      console.error(`[getWalletBalances] HTTP ${res.status} for ${address.slice(0, 8)}...`);
-      return null;
+      console.warn(`[getWalletBalances] HTTP ${res.status} for ${address.slice(0, 8)}…`);
+      return { ok: false, reason: "not_found" };
     } catch (error) {
       clearTimeout(timeout);
       // eslint-disable-next-line no-console
@@ -381,11 +404,21 @@ export async function getWalletBalances(
         await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
         continue;
       }
-      return null;
+      // Network timeout or persistent failure — throw to signal hard error
+      throw error;
     }
   }
 
-  return null;
+  // All retries exhausted — distinguish 429 exhaustion from 5xx exhaustion
+  if (lastFailureMode === "server_error") {
+    throw new Error(
+      `[getWalletBalances] Upstream server error after ${MAX_RETRIES} retries for ${address.slice(0, 8)}…`,
+    );
+  }
+
+  // eslint-disable-next-line no-console
+  console.warn(`[getWalletBalances] Rate limited after ${MAX_RETRIES} retries for ${address.slice(0, 8)}…`);
+  return { ok: false, reason: "rate_limited" };
 }
 
 // ──────────────────────────────────────────────────────────────

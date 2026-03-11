@@ -3,10 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { PublicKey } from "@solana/web3.js";  
 import { getAsset, type HeliusAssetInfo } from "@/lib/helius";
-import { getUserProfile, getSquadMemberCounts, ensureUserAndProfileExists } from "@/lib/db";
+import {
+  getUserProfile,
+  getSquadMemberCounts,
+  ensureUserAndProfileExists,
+} from "@/lib/db";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { syncArenaMarketCaps } from "@/lib/arena-sync";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter";
+import type { ConfidenceTier } from "@/types";
+import type { Database } from "@/types/supabase";
 
 // 🔥 TEK VE DOĞRU İMPORT SATIRI (Çakışmaları önler)
 import {
@@ -43,6 +49,24 @@ type ClaimResult = {
   errorCode?: ClaimErrorCode;
   projectId?: string;
 };
+
+/** Stable contract for squad/governance RPC actions; avoids returning raw Supabase Json. */
+export type SquadActionResult = { success: boolean; message: string };
+
+function normalizeSquadRpcResult(data: unknown): SquadActionResult {
+  if (data === null || typeof data !== "object") {
+    return { success: false, message: "Invalid protocol response." };
+  }
+  const obj = data as Record<string, unknown>;
+  const success = typeof obj.success === "boolean" ? obj.success : false;
+  const message =
+    typeof obj.message === "string"
+      ? obj.message
+      : success
+        ? "Done."
+        : "Invalid protocol response.";
+  return { success, message };
+}
 
 function extractUpdateAuthority(asset: HeliusAssetInfo): string | null {
   const metadataAuthority = asset.content?.metadata?.update_authority;
@@ -223,7 +247,16 @@ export type EliteAgent = {
   trustScore: number;
   isOptedIn: boolean;
   identityState: string;
+  // Intelligence Core V2 bridge (denormalized from trust_metrics; optional per-user).
+  latestSnapshotId?: string | null;
+  primaryStyle?: string | null;
+  scoreLabel?: string | null;
+  qualityOverall?: number | null;
+  suspiciousness?: number | null;
+  confidenceTier?: ConfidenceTier | null;
 };
+
+type TrustMetricsRow = Database["public"]["Tables"]["trust_metrics"]["Row"];
 
 export type PowerSquadProject = {
   rank: number;
@@ -254,6 +287,7 @@ export type PowerSquadProject = {
 };
 
 export async function getEliteAgents(): Promise<EliteAgent[]> {
+  // TODO (Phase 2D): Migrate this Arena read path from supabaseAdmin to a safe-read client (supabaseServer) for proper RLS isolation.
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -264,15 +298,74 @@ export async function getEliteAgents(): Promise<EliteAgent[]> {
 
   if (error || !data) return [];
 
-  return data.map((row, index) => ({
-    rank: index + 1,
-    id: row.id as string,
-    address: row.wallet_address as string,
-    username: (row.username as string) || "Unknown",
-    trustScore: (row.trust_score as number) || 0,
-    isOptedIn: (row.is_opted_in as boolean) || false,
-    identityState: (row.identity_state as string) || "ACTIVE",
-  }));
+  const userIds = data.map((row) => row.id as string);
+
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const { data: metricsRows, error: metricsError } = await supabaseAdmin
+  .from("trust_metrics")
+    .select(
+      "user_id, latest_snapshot_id, primary_style, quality_overall, suspiciousness, confidence_tier, score_label",
+    )
+    .in("user_id", userIds);
+
+  const bridgeByUserId = new Map<
+    string,
+    Pick<
+      TrustMetricsRow,
+      | "latest_snapshot_id"
+      | "primary_style"
+      | "quality_overall"
+      | "suspiciousness"
+      | "confidence_tier"
+      | "score_label"
+    >
+  >();
+
+  if (!metricsError && metricsRows) {
+    for (const row of metricsRows) {
+      const userId = row.user_id as string | undefined;
+      if (!userId) continue;
+      bridgeByUserId.set(userId, {
+        latest_snapshot_id: row.latest_snapshot_id ?? null,
+        primary_style: row.primary_style ?? null,
+        quality_overall: row.quality_overall ?? null,
+        suspiciousness: row.suspiciousness ?? null,
+        confidence_tier: row.confidence_tier ?? null,
+        score_label: row.score_label ?? null,
+      });
+    }
+  }
+
+  return data.map((row, index) => {
+    const id = row.id as string;
+    const bridge = bridgeByUserId.get(id);
+
+    let confidenceTier: ConfidenceTier | null = null;
+    if (bridge?.confidence_tier === "LOW" ||
+        bridge?.confidence_tier === "MEDIUM" ||
+        bridge?.confidence_tier === "HIGH") {
+      confidenceTier = bridge.confidence_tier;
+    }
+
+    return {
+      rank: index + 1,
+      id,
+      address: row.wallet_address as string,
+      username: (row.username as string) || "Unknown",
+      trustScore: (row.trust_score as number) || 0,
+      isOptedIn: (row.is_opted_in as boolean) || false,
+      identityState: (row.identity_state as string) || "ACTIVE",
+      latestSnapshotId: bridge?.latest_snapshot_id ?? null,
+      primaryStyle: bridge?.primary_style ?? null,
+      scoreLabel: bridge?.score_label ?? null,
+      qualityOverall: bridge?.quality_overall ?? null,
+      suspiciousness: bridge?.suspiciousness ?? null,
+      confidenceTier,
+    };
+  });
 }
 
 type FounderStats = {
@@ -313,23 +406,26 @@ export async function getPowerSquads(): Promise<PowerSquadProject[]> {
       .select("wallet_address, trust_score, identity_state")
       .in("wallet_address", founders);
 
-    if (usersData) {
-      for (const u of usersData) {
-        const isExiled = u.identity_state === "EXILED";
-        let mappedTier = "Newbie";
-        if (!isExiled) {
-          if (u.trust_score >= 900) mappedTier = "Legendary";
-          else if (u.trust_score >= 700) mappedTier = "Elite";
-          else if (u.trust_score >= 400) mappedTier = "Proven";
-          else if (u.trust_score >= 200) mappedTier = "Contributor";
+      if (usersData) {
+        for (const u of usersData) {
+          const isExiled = u.identity_state === "EXILED";
+          const trustScore = u.trust_score ?? 0;
+      
+          let mappedTier = "Newbie";
+          if (!isExiled) {
+            if (trustScore >= 900) mappedTier = "Legendary";
+            else if (trustScore >= 700) mappedTier = "Elite";
+            else if (trustScore >= 400) mappedTier = "Proven";
+            else if (trustScore >= 200) mappedTier = "Contributor";
+          }
+      
+          founderMap.set(u.wallet_address as string, {
+            score: trustScore,
+            tier: isExiled ? "EXILED" : mappedTier,
+            status: isExiled ? "EXILED" : "ACTIVE",
+          });
         }
-        founderMap.set(u.wallet_address as string, {
-          score: (u.trust_score as number) ?? 0,
-          tier: isExiled ? "EXILED" : mappedTier,
-          status: isExiled ? "EXILED" : "ACTIVE",
-        });
-      }
-    }
+      } 
   }
 
   return data.map((row, index) => {
@@ -460,7 +556,7 @@ export async function triggerManualSync(callerWallet: string, signedMessage: { m
 // 🔥 PUMPMATCH PROTOCOL: ACTION HANDLERS (V1.5 DAO-Ready) 🔥
 // ──────────────────────────────────────────────────────────────
 
-export async function addSquadMemberAction(payload: { projectId: string; targetWallet: string; founderWallet: string; role: string; nonce: string; timestamp: number; signature: string; }) {
+export async function addSquadMemberAction(payload: { projectId: string; targetWallet: string; founderWallet: string; role: string; nonce: string; timestamp: number; signature: string; }): Promise<SquadActionResult> {
   try {
     const founder = new PublicKey(payload.founderWallet.trim()).toBase58();
     const target = new PublicKey(payload.targetWallet.trim()).toBase58();
@@ -479,14 +575,14 @@ export async function addSquadMemberAction(payload: { projectId: string; targetW
     });
 
     if (error) throw error;
-    return data;
+    return normalizeSquadRpcResult(data);
   } catch (err) {
     console.error("[Protocol Error - addSquadMemberAction]", err);
     return { success: false, message: "Protocol execution failed." };
   }
 }
 
-export async function joinSquadAction(payload: { projectId: string; walletAddress: string; role: string; nonce: string; timestamp: number; signature: string; }) {
+export async function joinSquadAction(payload: { projectId: string; walletAddress: string; role: string; nonce: string; timestamp: number; signature: string; }): Promise<SquadActionResult> {
   try {
     const applicant = new PublicKey(payload.walletAddress.trim()).toBase58();
 
@@ -504,7 +600,7 @@ export async function joinSquadAction(payload: { projectId: string; walletAddres
     });
 
     if (error) throw error;
-    return data;
+    return normalizeSquadRpcResult(data);
   } catch (err) {
     console.error("[Protocol Error - joinSquadAction]", err);
     return { success: false, message: "Protocol execution failed." };
@@ -519,7 +615,7 @@ export async function executeSquadTransitionAction(input: {
   nonce: string;
   timestamp: number;
   signature: string;
-}) {
+}): Promise<SquadActionResult> {
   try {
     // 1. Base58 case-sensitive (Büyük/Küçük harf) yapısını bozmadan normalize et
     const actor = new PublicKey(input.actorWallet.trim()).toBase58();
@@ -575,7 +671,7 @@ export async function executeSquadTransitionAction(input: {
       throw error;
     }
 
-    return data ?? { success: true };
+    return normalizeSquadRpcResult(data ?? { success: true });
   } catch (err) {
     console.error("[Protocol Error - executeSquadTransitionAction]", err);
     return { success: false, message: "Governance transition failed due to internal error." };

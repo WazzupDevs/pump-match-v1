@@ -2,6 +2,7 @@ import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { ArenaProjectStatus, DexScreenerPair } from "@/types";
+import type { Database } from "@/types/supabase";
 
 // ──────────────────────────────────────────────────────────────
 // Arena Financial Snapshot Engine — Market Cap Sync Worker
@@ -49,6 +50,9 @@ type DexScreenerResponse = {
   pairs?: DexScreenerPair[];
 };
 
+type SquadProjectsUpdateRow =
+  Database["public"]["Tables"]["squad_projects"]["Update"];
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -61,8 +65,10 @@ async function fetchDexScreenerChunk(
   mintAddresses: string[],
 ): Promise<DexScreenerPair[]> {
   const joined = mintAddresses.join(",");
+
   try {
     const response = await fetch(`${DEXSCREENER_BASE}/${joined}`);
+
     if (!response.ok) {
       // eslint-disable-next-line no-console
       console.error(
@@ -70,6 +76,7 @@ async function fetchDexScreenerChunk(
       );
       return [];
     }
+
     const data = (await response.json()) as DexScreenerResponse;
     return data.pairs ?? [];
   } catch (error) {
@@ -91,9 +98,7 @@ function findBestPair(
   mintAddress: string,
 ): DexScreenerPair | null {
   // Exact match first (Solana base58 is case-sensitive)
-  let matching = pairs.filter(
-    (p) => p.baseToken.address === mintAddress,
-  );
+  let matching = pairs.filter((p) => p.baseToken.address === mintAddress);
 
   // Fallback: DexScreener may normalize casing on some chains
   if (matching.length === 0) {
@@ -105,9 +110,7 @@ function findBestPair(
 
   if (matching.length === 0) return null;
 
-  matching.sort(
-    (a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
-  );
+  matching.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
 
   return matching[0];
 }
@@ -190,6 +193,7 @@ export async function syncArenaMarketCaps(): Promise<{
     // "rugged" and placeholder mints are permanently excluded.
     const PLACEHOLDER_PREFIX = "SQUAD_NO_MINT_";
     const SYNCABLE_STATUSES: Set<string> = new Set(["active", "ghost"]);
+
     const allProjects = (projects as ProjectRow[]).filter(
       (p) =>
         !p.mint_address.startsWith(PLACEHOLDER_PREFIX) &&
@@ -207,7 +211,13 @@ export async function syncArenaMarketCaps(): Promise<{
     if (staleProjects.length === 0) {
       // eslint-disable-next-line no-console
       console.log("[Arena Sync] All projects are fresh. Nothing to sync.");
-      return { success: true, processed: 0, updated: 0, ghosted: 0, skipped: 0 };
+      return {
+        success: true,
+        processed: 0,
+        updated: 0,
+        ghosted: 0,
+        skipped: 0,
+      };
     }
 
     // ── 3. Chunk processing ──
@@ -257,6 +267,7 @@ export async function syncArenaMarketCaps(): Promise<{
 
         // ── Zombie Protocol ──
         let newStatus: ArenaProjectStatus = project.status as ArenaProjectStatus;
+
         if (
           liquidityUsd < ZOMBIE_LIQUIDITY_THRESHOLD &&
           volume24h < ZOMBIE_VOLUME_THRESHOLD
@@ -280,21 +291,50 @@ export async function syncArenaMarketCaps(): Promise<{
       }
 
       // ── 5. Bulk Commit (per chunk) ──
+      // NOTE:
+      // We intentionally use per-row UPDATE instead of UPSERT.
+      // This sync worker only mutates existing squad_projects rows and should
+      // never attempt to create new rows. Using upsert here forces the payload
+      // to satisfy the table Insert contract (e.g. created_by), which is wrong
+      // for a partial market-data patch and breaks typed Supabase builds.
       if (updates.length > 0) {
-        // Supabase upsert with id as conflict key
-        const { error: upsertError } = await supabase
-          .from("squad_projects")
-          .upsert(updates, { onConflict: "id" });
+        const updateResults = await Promise.all(
+          updates.map((project) => {
+            const payload: SquadProjectsUpdateRow = {
+              market_cap: project.market_cap,
+              liquidity_usd: project.liquidity_usd,
+              volume_24h: project.volume_24h,
+              last_valid_mc: project.last_valid_mc,
+              last_mc_update: project.last_mc_update,
+              status: project.status,
+            };
 
-        if (upsertError) {
+            return supabase
+              .from("squad_projects")
+              .update(payload)
+              .eq("id", project.id);
+          }),
+        );
+
+        const failedUpdates = updateResults
+          .map((result, index) => ({
+            id: updates[index]?.id,
+            error: result.error,
+          }))
+          .filter(
+            (entry): entry is { id: string; error: NonNullable<typeof entry.error> } =>
+              Boolean(entry.error && entry.id),
+          );
+
+        if (failedUpdates.length > 0) {
           // eslint-disable-next-line no-console
           console.error(
-            "[Arena Sync] Bulk upsert error for chunk:",
-            upsertError,
+            "[Arena Sync] Bulk update errors for chunk:",
+            failedUpdates,
           );
-        } else {
-          updated += updates.length;
         }
+
+        updated += updateResults.length - failedUpdates.length;
       }
     }
 
@@ -310,6 +350,7 @@ export async function syncArenaMarketCaps(): Promise<{
       p_key: "arena_sync",
       p_worker_id: "worker_1",
     });
+
     if (releaseError) {
       // eslint-disable-next-line no-console
       console.error("[Arena Sync] Failed to release lock:", releaseError);
