@@ -36,6 +36,7 @@ import {
 } from "@/lib/receipts";
 
 import type {
+  AnalysisProvenance,
   AnalyzeWalletResult,
   AnalyzeWalletResponse,
   AnalyzeWalletCoordinationProjection,
@@ -45,6 +46,7 @@ import type {
   BehavioralMetrics,
   ConfidenceLevel,
   MatchProfile,
+  OnchainCore,
   PumpStats,
   ScoreBreakdown,
   SocialLinks,
@@ -56,6 +58,7 @@ import type {
 } from "@/types";
 import { getTokenMarketSnapshot } from "@/lib/market-data";
 import { computeIntelligenceReport } from "@/lib/intelligence-engine";
+import { computeIntelligenceReportV3, projectV3ToLegacySurface } from "@/lib/intelligence-v3";
 
 /**
  * Backward-compat normalizer: ensures confidence exists on PumpStats.
@@ -204,11 +207,80 @@ function assignBadges(
   return badges;
 }
 
+/**
+ * Derives behavioral metric provenance from the on-chain core.
+ * Pure function — no side effects. Used for developer calibration only.
+ */
+function buildAnalysisProvenance(core: OnchainCore): AnalysisProvenance {
+  const bestHoldTimeSeconds =
+    core.generalMedianHoldTimeSeconds ?? core.pumpStats?.medianHoldTimeSeconds ?? null;
+
+  const holdTimeSource: AnalysisProvenance["holdTimeSource"] =
+    core.generalMedianHoldTimeSeconds != null
+      ? "GENERAL_LIFECYCLE"
+      : core.pumpStats?.medianHoldTimeSeconds != null
+        ? "PUMP_FALLBACK"
+        : "UNAVAILABLE";
+
+  const positionsSampledSource: AnalysisProvenance["positionsSampledSource"] =
+    core.generalClosedPositions != null
+      ? "GENERAL_CLOSED_POSITIONS"
+      : core.pumpStats?.closedPositions != null
+        ? "PUMP_FALLBACK"
+        : core.transactionCount > 0
+          ? "TX_COUNT_PROXY"
+          : "UNAVAILABLE";
+
+  const speculationBiasSource: AnalysisProvenance["speculationBiasSource"] =
+    (core.pumpStats?.pumpMintsTouched ?? 0) > 0
+      ? "PUMP"
+      : (core.generalClosedPositions ?? 0) > 0
+        ? "GENERAL_FALLBACK"
+        : "NEUTRAL";
+
+  // Mirrors the branching logic in calculateScore
+  const scorePenaltySource: AnalysisProvenance["scorePenaltySource"] =
+    (core.pumpStats?.pumpMintsTouched ?? 0) >= 3
+      ? "PUMP"
+      : (core.generalClosedPositions ?? 0) >= 3
+        ? "GENERAL_FLIP"
+        : "NONE";
+
+  const hasHoldOrTx = bestHoldTimeSeconds != null || core.transactionCount > 0;
+  const hasPumpOrGenPositions =
+    core.pumpStats?.pumpMintsTouched != null || (core.generalClosedPositions ?? 0) > 0;
+
+  return {
+    holdTimeSource,
+    positionsSampledSource,
+    speculationBiasSource,
+    scorePenaltySource,
+    signalSupport: {
+      momentumParticipation: hasHoldOrTx ? "PROXY" : "UNAVAILABLE",
+      breakoutChaseTendency: hasHoldOrTx ? "PROXY" : "UNAVAILABLE",
+      stakingVsSpeculationBias: hasPumpOrGenPositions ? "PROXY" : "UNAVAILABLE",
+    },
+  };
+}
+
+function jeetIndexFromHoldTimeSec(holdSec: number | null): number {
+  if (holdSec == null || holdSec <= 0) return 50;
+  if (holdSec <= 120) return 100;
+  if (holdSec <= 300) return 90;
+  if (holdSec <= 900) return 75;
+  if (holdSec <= 3600) return 50;
+  if (holdSec <= 14400) return 30;
+  if (holdSec <= 86400) return 10;
+  return 0;
+}
+
 function calculateScore(
   solBalance: number,
   transactionCount: number,
   tokenDiversity: number,
   pumpStats: PumpStats | null,
+  generalMedianHoldTimeSeconds: number | null = null,
+  generalClosedPositions: number | null = null,
 ): ScoreBreakdown {
   const balanceScore = Math.min(40, Math.floor(solBalance * 4));
   const isApiError = transactionCount === -1;
@@ -243,6 +315,12 @@ function calculateScore(
     if (jeetPen > 0) explanations.push(`Jeet Penalty (-${jeetPen})`);
     if (rugPen > 0) explanations.push(`Rug Exposure (-${rugPen})`);
     if (pumpBonus > 0) explanations.push(`Diamond Bonus (+${pumpBonus})`);
+  } else if ((generalClosedPositions ?? 0) >= 3) {
+    // General behavioral penalty — lighter than pump penalty (no rug-specific data).
+    const genJeet = jeetIndexFromHoldTimeSec(generalMedianHoldTimeSeconds);
+    const jeetPen = Math.round((genJeet / 100) * 20);
+    pumpPenalty += jeetPen;
+    if (jeetPen > 0) explanations.push(`Flip Penalty (-${jeetPen})`);
   }
 
   const baseScore = balanceScore + activityScore + diversityScore - basePenalty;
@@ -308,23 +386,7 @@ function calculateBadgeScores(badgeIds: BadgeId[]): { systemScore: number; socia
 // V8 Analysis Engine — Pipeline Stages
 // ──────────────────────────────────────────────────────────────
 
-/** Stage 1 output: raw on-chain data collected from Helius APIs */
-export type OnchainCore = {
-  solBalance: number;
-  transactionCount: number;
-  fungibleTokens: number;
-  totalNfts: number;
-  totalAssets: number;
-  tokenDiversity: number;
-  activityCount: number;
-  pumpStats: PumpStats | null;
-  approxWalletAgeDays: number | null;
-  portfolioValueUsd: number | undefined;
-  scoreBreakdown: ScoreBreakdown;
-  badges: BadgeId[];
-  /** Up to 5 unique fungible token mints for market data enrichment */
-  fungibleMints: string[];
-};
+// OnchainCore is now defined in types/intelligence-core.ts (imported via @/types above)
 
 /**
  * V8 Stage 1: Fetch all on-chain data in parallel.
@@ -384,7 +446,14 @@ async function fetchOnchainCore(trimmed: string): Promise<OnchainCore> {
   const totalAssets = fungibleTokens + totalNfts;
   const tokenDiversity = computeTokenDiversity(assetsByOwner.items);
   const activityCount = totalAssets + (transactionCount > 0 ? transactionCount : 0);
-  const scoreBreakdown = calculateScore(solBalance, transactionCount, tokenDiversity, pumpStats);
+  const scoreBreakdown = calculateScore(
+    solBalance,
+    transactionCount,
+    tokenDiversity,
+    pumpStats,
+    txData.generalMedianHoldTimeSeconds,
+    txData.generalClosedPositions,
+  );
   const badges = assignBadges(solBalance, transactionCount, tokenDiversity, pumpStats);
 
   // Extract up to 5 unique fungible token mints for market data enrichment
@@ -412,6 +481,14 @@ async function fetchOnchainCore(trimmed: string): Promise<OnchainCore> {
     pumpStats,
     approxWalletAgeDays: txData.approxWalletAgeDays,
     portfolioValueUsd: balancesResult.ok ? balancesResult.balances.totalUsdValue : undefined,
+    generalMedianHoldTimeSeconds: txData.generalMedianHoldTimeSeconds,
+    generalClosedPositions: txData.generalClosedPositions,
+    generalUniqueMintsTraded: txData.generalUniqueMintsTraded,
+    generalExitedUniqueMintsTraded: txData.generalExitedUniqueMintsTraded,
+    generalReEntryCount: txData.generalReEntryCount,
+    generalFastCloseCount: txData.generalFastCloseCount,
+    generalDirectionalTxCount: txData.generalDirectionalTxCount,
+    venueOverlay: txData.venueOverlay,
     scoreBreakdown,
     badges,
     fungibleMints: [...mintSet],
@@ -519,7 +596,7 @@ export async function analyzeWallet(
     // ── Stage 1: Fetch on-chain core ──
     const core = await fetchOnchainCore(trimmed);
 
-    // ── Stage 2: Compute canonical intelligence report (pure engine) ──
+    // ── Stage 2: Compute canonical intelligence reports (v2 current + v3 staged) ──
     const intelligenceReport = computeIntelligenceReport(core, "v2.0", "all");
 
     const {
@@ -527,6 +604,16 @@ export async function analyzeWallet(
       behavioral: behavioralFeatures,
       legacyTrustScore,
     } = intelligenceReport;
+
+    const intelligenceReportV3 = computeIntelligenceReportV3(core, trimmed, {
+      producerVersion: "v3.0-draft",
+      observationWindowKind: "ROLLING_90D",
+      observationWindowDays: 90,
+      transitional: {
+        compatibilityScore: snapshot.quality.overall,
+        trustScore: legacyTrustScore,
+      },
+    });
 
     const {
       solBalance,
@@ -650,6 +737,7 @@ export async function analyzeWallet(
     let finalIntelligenceConfidence = intelligenceConfidence;
     let finalIntelligenceSummary = intelligenceSummaryCore;
     let finalIntelligenceReport = intelligenceReport;
+    let finalIntelligenceReportV3 = intelligenceReportV3;
 
     if (architectActive) {
       console.log(
@@ -722,6 +810,72 @@ export async function analyzeWallet(
         behavioral: intelligenceReport.behavioral,
         legacyTrustScore: finalTrustScore,
       };
+
+      finalIntelligenceReportV3 = {
+        ...intelligenceReportV3,
+        primaryStyle: {
+          ...intelligenceReportV3.primaryStyle,
+          label: "CONVICTION_LED",
+          confidence: 99,
+        },
+        axes: {
+          ...intelligenceReportV3.axes,
+          style: {
+            ...intelligenceReportV3.axes.style,
+            overall: 95,
+            status: "MEASURED",
+            dimensions: {
+              conviction: 95,
+              rotation: 30,
+              momentum: 42,
+              patience: 90,
+              opportunism: 28,
+            },
+          },
+          quality: {
+            ...intelligenceReportV3.axes.quality,
+            overall: 94,
+            status: "MEASURED",
+          },
+          risk: {
+            ...intelligenceReportV3.axes.risk,
+            overall: 8,
+            status: "MEASURED",
+          },
+          adaptation: {
+            ...intelligenceReportV3.axes.adaptation,
+            overall: 58,
+            status: "ESTIMATED",
+          },
+          credibility: {
+            ...intelligenceReportV3.axes.credibility,
+            overall: 95,
+            status: "MEASURED",
+          },
+        },
+        summary: {
+          headline:
+            "Conviction-led · Strong Quality · Controlled Risk · HIGH coverage",
+          description:
+            "This wallet shows a conviction-led pattern driven by concentrated positioning, longer hold behavior, and lower rotation pressure. Risk posture is controlled while execution discipline currently reads strong quality. Coverage is high, so the observed pattern is relatively well-supported across the current observation window.",
+          keyPoints: [
+            "Primary behavior: concentrated positioning with longer holding periods and high rotation restraint.",
+            "Notable signal: High Conviction — Concentrated positioning, longer hold behavior, and low churn indicate strong conviction-led behavior.",
+            "Coverage note: high data support across the current observation window.",
+          ],
+        },
+        behavioralProfile: {
+          operatorType: "CONVICTION_OPERATOR",
+          pace: "PATIENT",
+          convictionProfile: "HIGH_CONVICTION",
+          riskPosture: "CONTROLLED",
+          adaptationProfile: "RESPONSIVE",
+        },
+        _transitional: {
+          compatibilityScore: 94,
+          trustScore: finalTrustScore,
+        },
+      };
     }
 
     // ── Canonical intelligence layer (coordination-agnostic) ──
@@ -753,6 +907,10 @@ export async function analyzeWallet(
         summary: finalIntelligenceSummary.summary,
       },
       intelligenceReport: finalIntelligenceReport,
+      intelligenceReportV3: finalIntelligenceReportV3,
+      legacyProjectionFromV3: projectV3ToLegacySurface(finalIntelligenceReportV3),
+      analysisProvenance: buildAnalysisProvenance(core),
+      venueOverlay: core.venueOverlay,
     };
 
     // ── Transitional compatibility projection (legacy score/trust/badges) ──

@@ -237,6 +237,23 @@ export default async function AnalyzePage({
     );
   }
 
+  // V3 Projection Bridge: prefer v3-derived legacy values when feature flag is active
+  const useV3Projection =
+    process.env.PUMPMATCH_ANALYZE_V3_PROJECTION === "1" &&
+    !!wa.legacyProjectionFromV3;
+
+  if (useV3Projection) {
+    const p = wa.legacyProjectionFromV3!;
+    wa = {
+      ...wa,
+      styleScores: p.styleScores,
+      qualityScores: p.qualityScores,
+      riskScores: p.riskScores,
+      intelligenceConfidence: p.intelligenceConfidence,
+      intelligenceSummary: p.intelligenceSummary,
+    };
+  }
+
   const compatibilityScore = clampScore(wa.qualityScores?.overall);
   const tone = scoreTone(compatibilityScore);
 
@@ -486,24 +503,13 @@ export default async function AnalyzePage({
           </div>
 
           <div className="rounded-3xl border border-slate-800 bg-slate-900/55 p-6 backdrop-blur-xl">
-            <p className="mb-4 text-sm text-slate-400">Behavioral Layer</p>
+            <p className="mb-4 text-sm text-slate-400">Behavioral Signals</p>
+
+            {/* General behavioral metrics — derived from all token trades */}
+            <p className="mb-3 text-[10px] uppercase tracking-[0.18em] text-slate-600">
+              General Behavior
+            </p>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                  Jeet Index
-                </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-200">
-                  {clampScore(wa.behavioral?.jeetIndex)}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                  Rug Exposure
-                </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-200">
-                  {clampScore(wa.behavioral?.rugExposureIndex)}
-                </p>
-              </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
                   Avg Hold Time
@@ -522,9 +528,38 @@ export default async function AnalyzePage({
               </div>
             </div>
 
+            {/* Pump.fun legacy overlay — only meaningful when pump activity exists */}
+            <div className="mt-5 border-t border-slate-800/70 pt-4">
+              <p className="mb-3 text-[10px] uppercase tracking-[0.18em] text-slate-600">
+                Pump.fun Overlay
+              </p>
+              {(wa.pumpStats?.pumpMintsTouched ?? 0) >= 1 ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                      Jeet Index
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-200">
+                      {clampScore(wa.behavioral?.jeetIndex)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                      Rug Exposure
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-200">
+                      {clampScore(wa.behavioral?.rugExposureIndex)}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600">No pump.fun activity detected</p>
+              )}
+            </div>
+
             {wa.behavioral?.evidenceSources ? (
               <p className="mt-4 text-xs leading-6 text-slate-500">
-                Evidence Sources: {wa.behavioral.evidenceSources}
+                Sources: {wa.behavioral.evidenceSources}
               </p>
             ) : null}
           </div>

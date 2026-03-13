@@ -1,4 +1,4 @@
-import type { OnchainCore } from "@/app/actions/analyzeWallet";
+import type { OnchainCore } from "@/types/intelligence-core";
 import type {
   ModelVersion,
   ScoreWindow,
@@ -19,25 +19,46 @@ export function clamp0to100(value: number): number {
 export function computeBehavioralFeatures(core: OnchainCore): BehavioralFeatures | null {
   const { pumpStats, transactionCount, approxWalletAgeDays } = core;
 
-  if (!pumpStats || pumpStats.pumpMintsTouched < 1) {
+  const hasPump = pumpStats != null && pumpStats.pumpMintsTouched >= 1;
+  const bestHoldTime =
+    core.generalMedianHoldTimeSeconds ?? pumpStats?.medianHoldTimeSeconds ?? null;
+
+  // Need at least some behavioral basis to produce features
+  if (!hasPump && bestHoldTime == null && transactionCount <= 0) {
     return null;
   }
 
-  const jeetIndex = pumpStats.jeetScore;
-  const rugExposureIndex = pumpStats.rugMagnetScore;
-  const avgHoldingTimeSec =
-    pumpStats.medianHoldTimeSeconds > 0 ? pumpStats.medianHoldTimeSeconds : undefined;
+  // Prefer pump-specific jeet/rug when available; derive from general hold time otherwise
+  const jeetIndex = hasPump
+    ? pumpStats.jeetScore
+    : jeetIndexFromHoldTime(bestHoldTime);
+  // Rug exposure is pump.fun-specific (dead bag ratio). Neutral for non-pump wallets.
+  const rugExposureIndex = hasPump ? pumpStats.rugMagnetScore : 0;
 
+  const avgHoldingTimeSec =
+    bestHoldTime != null && bestHoldTime > 0 ? bestHoldTime : undefined;
+
+  const closedPositions =
+    core.generalClosedPositions ?? pumpStats?.closedPositions ?? 0;
+
+  const directionalTxCount = core.generalDirectionalTxCount ?? transactionCount;
   let tradeFreqScore: number | undefined;
   if (approxWalletAgeDays != null && approxWalletAgeDays > 0) {
-    const tradesPerDay = pumpStats.closedPositions / approxWalletAgeDays;
-    tradeFreqScore = clamp0to100(tradesPerDay * 20);
+    const closedTradesPerDay = closedPositions / approxWalletAgeDays;
+    const generalTradesPerDay = directionalTxCount / approxWalletAgeDays;
+    tradeFreqScore = clamp0to100(
+      Math.max(closedTradesPerDay * 20, generalTradesPerDay * 5),
+    );
   } else if (transactionCount > 0) {
-    tradeFreqScore = clamp0to100(pumpStats.closedPositions * 5);
+    tradeFreqScore = clamp0to100(
+      Math.max(closedPositions * 5, Math.min(directionalTxCount, 100)),
+    );
   }
 
   const sources: string[] = ["Helius Enhanced TX"];
-  if (pumpStats.closedPositions >= 3) sources.push("Pump Simulation");
+  if (hasPump && pumpStats.closedPositions >= 3) sources.push("Pump Simulation");
+  if (core.generalClosedPositions != null && core.generalClosedPositions >= 3)
+    sources.push("General Lifecycle");
   if (approxWalletAgeDays != null) sources.push("Wallet Age");
   const evidenceSources = sources.join(" + ");
 
@@ -48,6 +69,17 @@ export function computeBehavioralFeatures(core: OnchainCore): BehavioralFeatures
     tradeFreqScore,
     evidenceSources,
   };
+}
+
+function jeetIndexFromHoldTime(holdTimeSec: number | null): number {
+  if (holdTimeSec == null || holdTimeSec <= 0) return 50; // neutral when unknown
+  if (holdTimeSec <= 120) return 100;
+  if (holdTimeSec <= 300) return 90;
+  if (holdTimeSec <= 900) return 75;
+  if (holdTimeSec <= 3600) return 50;
+  if (holdTimeSec <= 14400) return 30;
+  if (holdTimeSec <= 86400) return 10;
+  return 0;
 }
 
 export function computeConfidence(sampleSize: number): IntelligenceConfidence {
@@ -248,7 +280,9 @@ export function computeIntelligenceReport(
   const quality = computeQualityScores(core, behavioral);
   const risk = computeRiskScores(core, behavioral);
 
+  // Prefer general closed positions (all tokens) over pump-only positions
   const rawSample =
+    core.generalClosedPositions ??
     core.pumpStats?.closedPositions ??
     Math.max(0, Math.min(core.transactionCount, 100));
   const sampleSize = Math.max(0, rawSample ?? 0);

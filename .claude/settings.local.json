@@ -13,7 +13,20 @@
       "Bash(npx tsc --noEmit --pretty false)",
       "Bash(grep -rn \"Analyze\\\\|analyze\" ./app/page.tsx ./components/profile --include=*.tsx)",
       "Bash(npx next:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "mcp__helius__getTransactionHistory",
+      "mcp__helius__setHeliusApiKey",
+      "mcp__helius__getTokenBalances",
+      "mcp__helius__getBalance",
+      "mcp__helius__getWalletBalances",
+      "mcp__helius__getAssetsByOwner",
+      "mcp__helius__getWalletIdentity",
+      "Bash(grep -r \"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P\\\\|So11111111111111111111111111111111111111112\\\\|DZhC\\\\|FHv2\\\\|DiCG\\\\|Dbnb\\\\|4uCT\\\\|AuPp\\\\|2fg5\" /c/Projelerim/PUMPMATCH/pump-match --include=*.ts --include=*.tsx --include=*.md --include=*.json --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.next)",
+      "Bash(grep -r \"PublicKey\\\\|mint\\\\|0x\\\\|wallet.*address\" /c/Projelerim/PUMPMATCH/pump-match --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.next --exclude-dir=core-ai)",
+      "Bash(grep -E \"\\(0x[a-fA-F0-9]{40,}|[1-9A-HJ-NP-Z]{43,44}\\)\")",
+      "mcp__helius__getWalletFundedBy",
+      "mcp__helius__getWalletTransfers",
+      "Bash(find /c/Projelerim/PUMPMATCH/pump-match/app/api -type f -name *.ts -o -name *.tsx)"
     ]
   }
 }

@@ -193,7 +193,7 @@ export function SquadMemberModal({
         </button>
 
         <div className="flex items-center gap-3 mb-6">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 flex items-center justify-center">
+          <div className="h-10 w-10 rounded-xl bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 flex items-center justify-center">
             {isFounder ? <UserPlus className="h-5 w-5 text-blue-400" /> : <Users className="h-5 w-5 text-blue-400" />}
           </div>
           <div>
@@ -209,7 +209,7 @@ export function SquadMemberModal({
         <div className="space-y-5">
           {isFounder ? (
             <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1.5">
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5 items-center gap-1.5">
                 Target Wallet Address
               </label>
               <input
@@ -217,7 +217,7 @@ export function SquadMemberModal({
                 placeholder="e.g. 8xAd... (Solana Public Key)"
                 value={targetWallet}
                 onChange={(e) => setTargetWallet(e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-colors font-mono text-xs"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-colors font-mono"
               />
             </div>
           ) : (
@@ -258,13 +258,13 @@ export function SquadMemberModal({
 
         {submitError && (
           <div className="mt-5 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2.5">
-            <AlertTriangle className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
+            <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
             <p className="text-xs text-rose-300 leading-snug">{submitError}</p>
           </div>
         )}
         {successMsg && (
           <div className="mt-5 flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
-            <ShieldCheck className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
             <p className="text-xs text-emerald-300 leading-snug">{successMsg}</p>
           </div>
         )}
@@ -273,7 +273,7 @@ export function SquadMemberModal({
           <button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1 rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-sm text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors disabled:opacity-50">
             Cancel
           </button>
-          <button type="button" onClick={handleSubmit} disabled={isSubmitting || (isFounder && !targetWallet.trim()) || !!successMsg} className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-slate-50 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-[0_0_15px_-3px_rgba(59,130,246,0.4)]">
+          <button type="button" onClick={handleSubmit} disabled={isSubmitting || (isFounder && !targetWallet.trim()) || !!successMsg} className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-linear-to-r from-blue-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-slate-50 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-[0_0_15px_-3px_rgba(59,130,246,0.4)]">
             {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing...</> : isFounder ? "Sign & Send Invite" : "Sign & Send Request"}
           </button>
         </div>

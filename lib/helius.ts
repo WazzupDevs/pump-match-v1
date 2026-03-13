@@ -1,5 +1,5 @@
 import "server-only";
-import type { ConfidenceLevel, PumpStats } from "@/types";
+import type { ConfidenceLevel, PumpStats, VenueId, VenueOverlay } from "@/types";
 
 // SECURITY: Server-only API key. NEVER use NEXT_PUBLIC_ prefix for Helius key —
 // that would expose it to the browser bundle and allow API abuse.
@@ -508,6 +508,77 @@ const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const PUMP_FUN_EPOCH_SEC = 1704067200; // 2024-01-01 UTC, seconds
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
+// Maps Helius Enhanced Transaction `source` field values to canonical venue IDs.
+// Source tags not listed here fall back to OTHER.
+const KNOWN_VENUE_SOURCES: Record<string, VenueId> = {
+  PUMP_FUN: "PUMP_FUN",
+  JUPITER: "JUPITER",
+  RAYDIUM: "RAYDIUM",
+  METEORA: "METEORA",
+  ORCA: "ORCA",
+};
+const MIN_TXS_FOR_CONFIDENT_VENUE = 5;
+const MIN_SHARE_FOR_CONFIDENT_VENUE = 0.40;
+
+/**
+ * Derives venue/protocol execution overlay from already-fetched Enhanced Transactions.
+ * Detection order:
+ *   1. Pump.fun: isPumpTx() program-ID inspection (Helius source is unreliable for pump.fun)
+ *   2. All others: Helius `source` field (reliable for Jupiter/Raydium/Meteora/Orca)
+ *   3. Fallback: OTHER
+ * Only counts token-involving transactions where the wallet is sender or receiver.
+ * Additive overlay — must never feed canonical axes or confidence.
+ */
+function computeVenueOverlay(
+  address: string,
+  txs: EnhancedTransaction[],
+): VenueOverlay {
+  const counts: Record<VenueId, number> = {
+    PUMP_FUN: 0,
+    JUPITER: 0,
+    RAYDIUM: 0,
+    METEORA: 0,
+    ORCA: 0,
+    OTHER: 0,
+  };
+  let totalVenuedTxs = 0;
+
+  for (const tx of txs) {
+    const isWalletTokenTx = tx.tokenTransfers?.some(
+      (tr) => tr?.fromUserAccount === address || tr?.toUserAccount === address,
+    );
+    if (!isWalletTokenTx) continue;
+    totalVenuedTxs++;
+    // Pump.fun: use program-ID inspection first — Helius sometimes returns source:"UNKNOWN"
+    // for pump.fun transactions, causing them to be miscounted as OTHER.
+    if (isPumpTx(tx)) {
+      counts.PUMP_FUN++;
+      continue;
+    }
+    const venueId = KNOWN_VENUE_SOURCES[(tx.source ?? "").toUpperCase()] ?? "OTHER";
+    counts[venueId]++;
+  }
+
+  if (totalVenuedTxs === 0) {
+    return { dominantVenue: null, dominantVenueConfident: false, venueBreakdown: counts, totalVenuedTxs: 0 };
+  }
+
+  let maxCount = 0;
+  let dominant: VenueId = "OTHER";
+  for (const venue of Object.keys(counts) as VenueId[]) {
+    if (counts[venue] > maxCount) {
+      maxCount = counts[venue];
+      dominant = venue;
+    }
+  }
+
+  const dominantVenueConfident =
+    maxCount >= MIN_TXS_FOR_CONFIDENT_VENUE &&
+    maxCount / totalVenuedTxs >= MIN_SHARE_FOR_CONFIDENT_VENUE;
+
+  return { dominantVenue: dominant, dominantVenueConfident, venueBreakdown: counts, totalVenuedTxs };
+}
+
 // Zaman Birimi Zırhı (Helius bazen ms, bazen sec dönebilir)
 function toSec(ts: number): number {
   return ts > 1_000_000_000_000 ? Math.floor(ts / 1000) : ts;
@@ -634,6 +705,99 @@ function simulatePump(
   return { holds, closedPositions, pumpMintsTouched, dead };
 }
 
+/**
+ * General-purpose position lifecycle simulation.
+ * Tracks ALL token transfers (not just pump.fun) to compute realistic
+ * hold durations across the wallet's full trading activity.
+ * Uses the same entry/exit state machine as simulatePump but without
+ * the pump.fun mint filter.
+ */
+// Positions closed in < 1 hour are counted as "fast closes" — aligns with VERY_SHORT hold tier.
+const FAST_CLOSE_THRESHOLD_SEC = 3600;
+
+// Transaction types representing non-directional protocol mechanics.
+// Skipping these prevents LP/vault operations from inflating lifecycle stats
+// (re-entry count, unique mints, fast-close count, churn rate).
+const NON_DIRECTIONAL_TX_TYPES = new Set([
+  "ADD_LIQUIDITY",
+  "REMOVE_LIQUIDITY",
+  "CREATE_POOL",
+]);
+
+function simulateGeneralHolds(
+  address: string,
+  txs: EnhancedTransaction[],
+): { holds: number[]; closedPositions: number; uniqueMints: number; exitedUniqueMints: number; reEntryCount: number; fastCloseCount: number; directionalTxCount: number } {
+  const states = new Map<string, { balance: number; openTs: number | null; cycleCount: number }>();
+  const touchedMints = new Set<string>();
+  const exitedMints = new Set<string>();
+  const holds: number[] = [];
+  let closedPositions = 0;
+  let reEntryCount = 0;
+  let fastCloseCount = 0;
+  let directionalTxCount = 0;
+
+  const chronological = [...txs].reverse();
+
+  for (const tx of chronological) {
+    const tsRaw = tx.timestamp;
+    if (!tsRaw || !tx.tokenTransfers?.length) continue;
+
+    // Skip LP and pool-creation transactions — these produce balance transitions
+    // that resemble lifecycle events but represent protocol mechanics, not directional trades.
+    if (NON_DIRECTIONAL_TX_TYPES.has((tx.type ?? "").toUpperCase())) continue;
+
+    const ts = toSec(tsRaw);
+    let txHasWalletDelta = false;
+
+    for (const tr of tx.tokenTransfers) {
+      const mint = tr?.mint;
+      if (!mint || mint === WSOL_MINT) continue;
+
+      const amt = Number(tr.tokenAmount ?? 0);
+      if (!Number.isFinite(amt) || amt === 0) continue;
+
+      const delta =
+        tr.toUserAccount === address ? amt :
+        tr.fromUserAccount === address ? -amt :
+        0;
+
+      if (delta === 0) continue;
+
+      txHasWalletDelta = true;
+      touchedMints.add(mint);
+
+      const st = states.get(mint) ?? { balance: 0, openTs: null, cycleCount: 0 };
+      const prevBal = st.balance;
+      const nextBal = prevBal + delta;
+
+      // Entry: balance crosses zero → positive
+      if (prevBal <= EPSILON && nextBal > EPSILON) {
+        if (st.cycleCount >= 1) reEntryCount++; // wallet returned to this mint after a full exit
+        st.openTs = ts;
+      }
+
+      // Exit: balance crosses positive → zero
+      if (prevBal > EPSILON && nextBal <= EPSILON && st.openTs != null) {
+        const holdDuration = Math.max(0, ts - st.openTs);
+        holds.push(holdDuration);
+        closedPositions++;
+        exitedMints.add(mint); // track unique mints with at least one confirmed closed cycle
+        if (holdDuration < FAST_CLOSE_THRESHOLD_SEC) fastCloseCount++;
+        st.cycleCount++;
+        st.openTs = null;
+      }
+
+      st.balance = nextBal <= EPSILON ? 0 : nextBal;
+      states.set(mint, st);
+    }
+
+    if (txHasWalletDelta) directionalTxCount++;
+  }
+
+  return { holds, closedPositions, uniqueMints: touchedMints.size, exitedUniqueMints: exitedMints.size, reEntryCount, fastCloseCount, directionalTxCount };
+}
+
 // 🚀 Zırhlanmış Ana Veri Çekme Fonksiyonu
 export async function getWalletTransactionData(address: string): Promise<{
   transactionCount: number;
@@ -641,6 +805,14 @@ export async function getWalletTransactionData(address: string): Promise<{
   firstTxBlockTime: number | null;
   approxWalletAgeDays: number | null;
   pumpStats: PumpStats | null;
+  generalMedianHoldTimeSeconds: number | null;
+  generalClosedPositions: number | null;
+  generalUniqueMintsTraded: number | null;
+  generalExitedUniqueMintsTraded: number | null;
+  generalReEntryCount: number | null;
+  generalFastCloseCount: number | null;
+  generalDirectionalTxCount: number | null;
+  venueOverlay: VenueOverlay | null;
 }> {
   try {
     const all: EnhancedTransaction[] = [];
@@ -648,10 +820,13 @@ export async function getWalletTransactionData(address: string): Promise<{
     const PAGE_SIZE = 100;
 
     const EARLY_STOP_PAGES = 2;       // 200 tx
-    const CLOSED_POS_TARGET = 30;     // Stat sufficiency (İstatistiksel yeterlilik sınırı)
+    const CLOSED_POS_TARGET = 30;     // Stat sufficiency
+    const LOOKBACK_DAYS = 180;
+    const lookbackEpochSec = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
 
     let cursor: string | undefined;
     let pumpTxCountSoFar = 0;
+    let tokenTxCount = 0;
     const pumpUniverse = new Set<string>();
 
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -660,13 +835,13 @@ export async function getWalletTransactionData(address: string): Promise<{
 
       all.push(...batch);
 
-      // pump universe & pump tx counter güncellemeleri
+      // pump universe + pump tx counter + general token tx counter
       for (const tx of batch) {
         if (!tx.tokenTransfers?.length) continue;
+        tokenTxCount++;
         if (isPumpTx(tx)) {
           pumpTxCountSoFar++;
           for (const tr of tx.tokenTransfers) {
-            // Only add mints that involve this wallet and are not WSOL
             if (tr?.mint && tr.mint !== WSOL_MINT && (tr.toUserAccount === address || tr.fromUserAccount === address)) {
               pumpUniverse.add(tr.mint);
             }
@@ -677,20 +852,28 @@ export async function getWalletTransactionData(address: string): Promise<{
       const oldestTxInBatch = batch[batch.length - 1];
       cursor = oldestTxInBatch?.signature;
 
-      // 1) Epoch cutoff (Pump.fun çıkış tarihinden öncesine gitme)
+      // 1) Time-based cutoff: don't fetch beyond the lookback window
       const oldestTsRaw = oldestTxInBatch?.timestamp;
       if (oldestTsRaw) {
         const oldestSec = toSec(oldestTsRaw);
-        if (oldestSec < PUMP_FUN_EPOCH_SEC) break;
+        if (oldestSec < lookbackEpochSec) break;
       }
 
-      // 2) Relevance early stop (2 sayfa çektik ama hala Pump tx yoksa işlemi kes)
-      if (page === EARLY_STOP_PAGES - 1 && pumpTxCountSoFar === 0) break;
+      // 2) Relevance early stop: no token-involving txs after EARLY_STOP_PAGES → not a token trader
+      if (page === EARLY_STOP_PAGES - 1 && tokenTxCount === 0) break;
 
-      // 3) Stat sufficiency (Yeterli veri bulduysak, gereksiz sayfa çekme)
-      if (pumpTxCountSoFar > 0 && page >= 1) {
-        const sim = simulatePump(address, all, pumpUniverse);
-        if (sim.closedPositions >= CLOSED_POS_TARGET) break;
+      // 3) Stat sufficiency: stop when enough closed positions (pump or general)
+      if (page >= 1) {
+        let sufficient = false;
+        if (pumpTxCountSoFar > 0) {
+          const sim = simulatePump(address, all, pumpUniverse);
+          if (sim.closedPositions >= CLOSED_POS_TARGET) sufficient = true;
+        }
+        if (!sufficient) {
+          const genSim = simulateGeneralHolds(address, all);
+          if (genSim.closedPositions >= CLOSED_POS_TARGET) sufficient = true;
+        }
+        if (sufficient) break;
       }
 
       if (batch.length < PAGE_SIZE) break;
@@ -698,7 +881,7 @@ export async function getWalletTransactionData(address: string): Promise<{
 
     const transactionCount = all.length;
     if (transactionCount === 0) {
-      return { transactionCount: 0, firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null, pumpStats: null };
+      return { transactionCount: 0, firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null, pumpStats: null, generalMedianHoldTimeSeconds: null, generalClosedPositions: null, generalUniqueMintsTraded: null, generalExitedUniqueMintsTraded: null, generalReEntryCount: null, generalFastCloseCount: null, generalDirectionalTxCount: null, venueOverlay: null };
     }
 
     const oldest = all[all.length - 1];
@@ -707,15 +890,37 @@ export async function getWalletTransactionData(address: string): Promise<{
     const firstTxSec = firstTxBlockTime != null ? toSec(firstTxBlockTime) : null;
     const approxWalletAgeDays = firstTxSec != null ? Math.floor((Date.now() - firstTxSec * 1000) / 86400000) : null;
 
+    // General lifecycle: compute hold durations across ALL token trades (not just pump.fun)
+    const generalSim = simulateGeneralHolds(address, all);
+    const generalMedianHoldTimeSeconds = generalSim.closedPositions > 0
+      ? Math.round(median(generalSim.holds))
+      : null;
+    const generalClosedPositions = generalSim.closedPositions > 0
+      ? generalSim.closedPositions
+      : null;
+    const generalUniqueMintsTraded = generalSim.uniqueMints > 0 ? generalSim.uniqueMints : null;
+    // Unique mints with at least one confirmed exit cycle — the correct breadth basis for churn/narrative signals.
+    // Unlike generalClosedPositions (cycle count), this deduplicates repeated cycles on the same mint.
+    // Unlike generalUniqueMintsTraded (entry OR exit), this excludes airdrop-receipt-only mints.
+    const generalExitedUniqueMintsTraded = generalSim.exitedUniqueMints > 0 ? generalSim.exitedUniqueMints : null;
+    // Only surface re-entry and fast-close counts when at least one closed position exists.
+    const generalReEntryCount = generalSim.closedPositions > 0 ? generalSim.reEntryCount : null;
+    const generalFastCloseCount = generalSim.closedPositions > 0 ? generalSim.fastCloseCount : null;
+    // Always surface directional tx count when we have tx data — zero is meaningful (all LP wallet).
+    const generalDirectionalTxCount = generalSim.directionalTxCount;
+
+    // Venue overlay: derived from Helius `source` field on already-fetched txs. Zero new API calls.
+    const venueOverlay = computeVenueOverlay(address, all);
+
     if (pumpTxCountSoFar === 0) {
-      return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null };
+      return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null, generalMedianHoldTimeSeconds, generalClosedPositions, generalUniqueMintsTraded, generalExitedUniqueMintsTraded, generalReEntryCount, generalFastCloseCount, generalDirectionalTxCount, venueOverlay };
     }
 
     // Gerçek Simülasyon
     const { holds, closedPositions, pumpMintsTouched, dead } = simulatePump(address, all, pumpUniverse);
 
     if (pumpMintsTouched === 0) {
-      return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null };
+      return { transactionCount, firstTxSignature, firstTxBlockTime, approxWalletAgeDays, pumpStats: null, generalMedianHoldTimeSeconds, generalClosedPositions, generalUniqueMintsTraded, generalExitedUniqueMintsTraded, generalReEntryCount, generalFastCloseCount, generalDirectionalTxCount, venueOverlay };
     }
 
     const medianHold = Math.round(median(holds));
@@ -740,9 +945,17 @@ export async function getWalletTransactionData(address: string): Promise<{
         rugMagnetScore,
         confidence,
       },
+      generalMedianHoldTimeSeconds,
+      generalClosedPositions,
+      generalUniqueMintsTraded,
+      generalExitedUniqueMintsTraded,
+      generalReEntryCount,
+      generalFastCloseCount,
+      generalDirectionalTxCount,
+      venueOverlay,
     };
   } catch (error) {
     console.error(`[getWalletTransactionData] Exception for ${address}:`, error);
-    return { transactionCount: -1, firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null, pumpStats: null };
+    return { transactionCount: -1, firstTxSignature: null, firstTxBlockTime: null, approxWalletAgeDays: null, pumpStats: null, generalMedianHoldTimeSeconds: null, generalClosedPositions: null, generalUniqueMintsTraded: null, generalExitedUniqueMintsTraded: null, generalReEntryCount: null, generalFastCloseCount: null, generalDirectionalTxCount: null, venueOverlay: null };
   }
 }

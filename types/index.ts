@@ -15,6 +15,9 @@ import type {
   ArenaBridgeFields,
 } from "./intelligence";
 
+import type { IntelligenceReportV3 } from "./intelligence-report-v3";
+import type { LegacyProjectedSurface } from "@/lib/intelligence-v3/adapters";
+
 export type {
   ModelVersion,
   ScoreWindow,
@@ -33,6 +36,26 @@ export type {
 };
 
 export * from "./public-intelligence";
+export * from "./intelligence-core";
+
+
+export type {
+  IntelligenceReportV3,
+  IntelligenceReportSchemaVersion,
+  ObservationWindowKind,
+  ObservationWindow,
+  CoverageTier,
+  CoverageAssessment,
+  AxisStatus,
+  AxisResult,
+  BehavioralAxes,
+  BehavioralSignalFamilies,
+  PrimaryStyleLabel,
+  PrimaryStyleClassification,
+  IntelligenceBadgeV3,
+  BehavioralProfile,
+  TransitionalCompatibilityV3,
+} from "./intelligence-report-v3";
 
 export type BadgeId =
   | "whale"
@@ -150,6 +173,51 @@ export type SocialLinks = {
   telegram?: string;
 };
 
+/** Known Solana trading venues identifiable from Helius Enhanced Transaction source tags */
+export type VenueId = "PUMP_FUN" | "JUPITER" | "RAYDIUM" | "METEORA" | "ORCA" | "OTHER";
+
+/**
+ * Venue/protocol execution overlay.
+ * Additive context only — NOT fed into canonical style axes, coverage, or confidence.
+ * Derived from Helius Enhanced Transaction `source` field on already-fetched transactions.
+ */
+export type VenueOverlay = {
+  /** Dominant venue by token-tx count. Null when no token-involving txs observed. */
+  dominantVenue: VenueId | null;
+  /** True when dominant venue has ≥5 token-txs AND represents ≥40% of observed token activity */
+  dominantVenueConfident: boolean;
+  /** Per-venue token-tx counts (only txs where this wallet is sender or receiver) */
+  venueBreakdown: Record<VenueId, number>;
+  /** Total token-involving txs used for venue attribution */
+  totalVenuedTxs: number;
+};
+
+/**
+ * Internal debug/provenance layer.
+ * Tracks where each behavioral metric was sourced — for developer calibration and
+ * migration auditing. Not a public product surface. Optional on all response types.
+ */
+export type AnalysisProvenance = {
+  /** Whether hold time came from general lifecycle simulation or pump fallback */
+  holdTimeSource: "GENERAL_LIFECYCLE" | "PUMP_FALLBACK" | "UNAVAILABLE";
+  /** Whether positionsSampled came from general closed positions or pump/tx fallback */
+  positionsSampledSource:
+    | "GENERAL_CLOSED_POSITIONS"
+    | "PUMP_FALLBACK"
+    | "TX_COUNT_PROXY"
+    | "UNAVAILABLE";
+  /** Whether speculation bias is driven by pump activity, general fallback, or neutral */
+  speculationBiasSource: "PUMP" | "GENERAL_FALLBACK" | "NEUTRAL";
+  /** What drove the legacy score penalty path */
+  scorePenaltySource: "PUMP" | "GENERAL_FLIP" | "NONE";
+  /** Support state for key v3 signals */
+  signalSupport: {
+    momentumParticipation: "PROXY" | "UNAVAILABLE";
+    breakoutChaseTendency: "PROXY" | "UNAVAILABLE";
+    stakingVsSpeculationBias: "PROXY" | "UNAVAILABLE";
+  };
+};
+
 // Intelligence Core V2: wallet-level intelligence snapshot (coordination-agnostic).
 // Coordination metadata (like intent) lives on UserProfile, not here; any intent on
 // WalletAnalysis is strictly a deprecated coordination projection.
@@ -181,6 +249,14 @@ export type WalletIntelligenceCanonical = {
   intelligenceSummary?: IntelligenceSummary;
   // Intelligence Core V2: canonical report snapshot (Phase 2+)
   intelligenceReport?: IntelligenceReport;
+  // Intelligence Core V3: canonical deterministic behavioral report (staged rollout)
+  intelligenceReportV3?: IntelligenceReportV3;
+  // V3 Projection Bridge: legacy presentation values derived from v3 report (feature-flagged)
+  legacyProjectionFromV3?: LegacyProjectedSurface;
+  /** Internal debug provenance — tracks behavioral metric sources. Not a public product field. */
+  analysisProvenance?: AnalysisProvenance;
+  /** Venue/protocol execution overlay. Additive context; does not alter canonical axes. */
+  venueOverlay?: VenueOverlay | null;
 };
 
 /**
@@ -239,7 +315,7 @@ export type MarketSnapshot = {
 export type BehavioralMetrics = {
   jeetIndex: number;           // 0-100: higher = more jeet-like behavior
   rugExposureIndex: number;    // 0-100: higher = more rug exposure
-  avgHoldingTimeSec?: number;  // median holding time in seconds (proxy from pumpStats)
+  avgHoldingTimeSec?: number;  // median holding time in seconds (general lifecycle — all token trades, not pump-only)
   tradeFreqScore?: number;     // 0-100: trade frequency relative to wallet age
   /**
    * Canonical V2 name: describes which evidence sources contributed
